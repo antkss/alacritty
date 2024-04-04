@@ -41,6 +41,7 @@ use crate::config::UiConfig;
 use crate::display::bell::VisualBell;
 use crate::display::color::{List, Rgb};
 use crate::display::content::{RenderableContent, RenderableCursor};
+use crate::display::cursor::CursorRects;
 use crate::display::cursor::IntoRects;
 use crate::display::damage::{damage_y_to_viewport_y, DamageTracker};
 use crate::display::hint::{HintMatch, HintState};
@@ -392,6 +393,9 @@ pub struct Display {
 
     glyph_cache: GlyphCache,
     meter: Meter,
+
+    // Old cursor
+    cursor_rects: Option<CursorRects>,
 }
 
 impl Display {
@@ -529,6 +533,7 @@ impl Display {
             cursor_hidden: Default::default(),
             meter: Default::default(),
             ime: Default::default(),
+            cursor_rects: None,
         })
     }
 
@@ -843,7 +848,24 @@ impl Display {
         };
 
         // Draw cursor.
-        rects.extend(cursor.rects(&size_info, config.cursor.thickness()));
+        let block_rep_shape = config.cursor.block_replace_shape().map(|x| x.shape);
+        let new_cur_rects =
+            cursor.rects(&size_info, config.cursor.thickness(), block_rep_shape);
+        if config.cursor.smooth_motion {
+            match self.cursor_rects {
+                None =>
+                    self.cursor_rects = Some(new_cur_rects),
+                Some(ref mut crcts) =>
+                    crcts.interpolate(
+                        &new_cur_rects,
+                        config.cursor.smooth_motion_factor,
+                        config.cursor.smooth_motion_spring
+                    ),
+            };
+        } else {
+            self.cursor_rects = Some(new_cur_rects);
+        }
+        rects.extend(self.cursor_rects.unwrap());
 
         // Push visual bell after url/underline/strikeout rects.
         let visual_bell_intensity = self.visual_bell.intensity();
@@ -883,7 +905,7 @@ impl Display {
                     let cursor_width = NonZeroU32::new(1).unwrap();
                     let cursor =
                         RenderableCursor::new(Point::new(line, column), shape, fg, cursor_width);
-                    rects.extend(cursor.rects(&size_info, config.cursor.thickness()));
+                    rects.extend(cursor.rects(&size_info, config.cursor.thickness(), block_rep_shape));
                 }
 
                 Some(Point::new(line, column))
@@ -1153,7 +1175,7 @@ impl Display {
                 );
                 let cursor_point = Point::new(point.line, cursor_column);
                 let cursor = RenderableCursor::new(cursor_point, shape, fg, width);
-                rects.extend(cursor.rects(&self.size_info, config.cursor.thickness()));
+                rects.extend(cursor.rects(&self.size_info, config.cursor.thickness(), None));
                 cursor_point
             },
             _ => end,
