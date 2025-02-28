@@ -509,6 +509,7 @@ pub enum EventType {
     BlinkCursorTimeout,
     SearchNext,
     Frame,
+    CursorTrail,
 }
 
 impl From<TerminalEvent> for EventType {
@@ -793,6 +794,7 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
 
     #[inline]
     fn display(&mut self) -> &mut Display {
+        self.schedule_trail(40);
         self.display
     }
 
@@ -1515,7 +1517,13 @@ impl<'a, N: Notify + 'a, T: EventListener> ActionContext<'a, N, T> {
         let blinking_interval = Duration::from_millis(self.config.cursor.blink_interval());
         self.scheduler.schedule(event, blinking_interval, true, timer_id);
     }
-
+    fn schedule_trail(&mut self, millis: u64) {
+        let window_id = self.display.window.id();
+        let timer_id = TimerId::new(Topic::CursorTrail, window_id);
+        let event = Event::new(EventType::CursorTrail, window_id);
+        let interval = Duration::from_millis(millis);
+        self.scheduler.schedule(event, interval, true, timer_id);
+    }
     fn schedule_blinking_timeout(&mut self) {
         let blinking_timeout = self.config.cursor.blink_timeout();
         if blinking_timeout == Duration::ZERO {
@@ -1716,6 +1724,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         self.ctx.display.cursor_hidden ^= true;
                         *self.ctx.dirty = true;
                     }
+                },
+                EventType::CursorTrail => {
+
                 },
                 EventType::BlinkCursorTimeout => {
                     // Disable blinking after timeout reached.
