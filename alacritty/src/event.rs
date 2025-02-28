@@ -794,7 +794,6 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
 
     #[inline]
     fn display(&mut self) -> &mut Display {
-        self.schedule_trail(40);
         self.display
     }
 
@@ -1726,7 +1725,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-
+                    *self.ctx.dirty = true;
                 },
                 EventType::BlinkCursorTimeout => {
                     // Disable blinking after timeout reached.
@@ -1849,6 +1848,12 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     WindowEvent::Touch(touch) => self.touch(touch),
                     WindowEvent::Focused(is_focused) => {
                         self.ctx.terminal.is_focused = is_focused;
+                        if is_focused {
+                            self.ctx.schedule_trail(15);
+                        } else {
+                            let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
+                            self.ctx.scheduler.unschedule(timer_id);
+                        }
 
                         // When the unfocused hollow is used we must redraw on focus change.
                         if self.ctx.config.cursor.unfocused_hollow {
