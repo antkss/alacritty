@@ -18,11 +18,6 @@ Available in AUR: https://aur.archlinux.org/packages/alacritty-smooth-cursor-git
 
 ## Known issues
 
-* This fork doesn't run well on Wayland (#3 if you want to tackle it). For now,
-  build the application without Wayland support to make it use XWayland:
-  `cargo run --features=x11 --no-default-features`.  I used to recommend
-  unsetting `WAYLAND_DISPLAY` here: __don't do it please__. This will make
-  __all__ applications you start from the terminal ignore your Wayland session.
 * Currently redraws are dumb and update the window every frame even if nothing
   has changed. Expect a little GPU usage in idle (progress in #2).
 * Block cursor may look really off due to blending hack that essentially just
@@ -79,6 +74,7 @@ Join [`#alacritty`] on libera.chat if you have questions or looking for a quick 
 ## Features
 
 You can find an overview over the features available in Alacritty [here](./docs/features.md).
+fixed on wayland
 
 ## Further information
 
