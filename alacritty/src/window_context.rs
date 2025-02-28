@@ -73,7 +73,7 @@ impl WindowContext {
         event_loop: &ActiveEventLoop,
         proxy: EventLoopProxy<Event>,
         config: Rc<UiConfig>,
-        mut options: WindowOptions,
+        options: WindowOptions,
     ) -> Result<Self, Box<dyn Error>> {
         let raw_display_handle = event_loop.display_handle().unwrap().as_raw();
 
@@ -83,7 +83,7 @@ impl WindowContext {
         // Windows has different order of GL platform initialization compared to any other platform;
         // it requires the window first.
         #[cfg(windows)]
-        let window = Window::new(event_loop, &config, &identity, &mut options)?;
+        let window = Window::new(event_loop, &config, &identity)?;
         #[cfg(windows)]
         let raw_window_handle = Some(window.raw_window_handle());
 
@@ -102,9 +102,10 @@ impl WindowContext {
             event_loop,
             &config,
             &identity,
-            &mut options,
             #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
             gl_config.x11_visual(),
+            #[cfg(target_os = "macos")]
+            &options.window_tabbing_id,
         )?;
 
         // Create context.
@@ -122,7 +123,7 @@ impl WindowContext {
         event_loop: &ActiveEventLoop,
         proxy: EventLoopProxy<Event>,
         config: Rc<UiConfig>,
-        mut options: WindowOptions,
+        options: WindowOptions,
         config_overrides: ParsedOptions,
     ) -> Result<Self, Box<dyn Error>> {
         let gl_display = gl_config.display();
@@ -134,9 +135,10 @@ impl WindowContext {
             event_loop,
             &config,
             &identity,
-            &mut options,
             #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
             gl_config.x11_visual(),
+            #[cfg(target_os = "macos")]
+            &options.window_tabbing_id,
         )?;
 
         // Create context.
@@ -212,7 +214,7 @@ impl WindowContext {
             Arc::clone(&terminal),
             event_proxy.clone(),
             pty,
-            pty_config.drain_on_exit,
+            pty_config.hold,
             config.debug.ref_test,
         )?;
 
@@ -360,7 +362,7 @@ impl WindowContext {
             return;
         }
 
-        self.dirty = false;
+        if !self.config.cursor.smooth_motion { self.dirty = false; }
 
         // Force the display to process any pending display update.
         self.display.process_renderer_update();

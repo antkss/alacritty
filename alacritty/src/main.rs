@@ -55,8 +55,6 @@ mod gl {
 
 #[cfg(unix)]
 use crate::cli::MessageOptions;
-#[cfg(not(any(target_os = "macos", windows)))]
-use crate::cli::SocketMessage;
 use crate::cli::{Options, Subcommands};
 use crate::config::monitor::ConfigMonitor;
 use crate::config::UiConfig;
@@ -91,13 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 /// `msg` subcommand entrypoint.
 #[cfg(unix)]
-#[allow(unused_mut)]
-fn msg(mut options: MessageOptions) -> Result<(), Box<dyn Error>> {
-    #[cfg(not(any(target_os = "macos", windows)))]
-    if let SocketMessage::CreateWindow(window_options) = &mut options.message {
-        window_options.activation_token =
-            env::var("XDG_ACTIVATION_TOKEN").or_else(|_| env::var("DESKTOP_STARTUP_ID")).ok();
-    }
+fn msg(options: MessageOptions) -> Result<(), Box<dyn Error>> {
     ipc::send_message(options.socket, options.message).map_err(|err| err.into())
 }
 
@@ -183,14 +175,7 @@ fn alacritty(mut options: Options) -> Result<(), Box<dyn Error>> {
     // Create the IPC socket listener.
     #[cfg(unix)]
     let socket_path = if config.ipc_socket() {
-        match ipc::spawn_ipc_socket(&options, window_event_loop.create_proxy()) {
-            Ok(path) => Some(path),
-            Err(err) if options.daemon => return Err(err.into()),
-            Err(err) => {
-                log::warn!("Unable to create socket: {:?}", err);
-                None
-            },
-        }
+        ipc::spawn_ipc_socket(&options, window_event_loop.create_proxy())
     } else {
         None
     };

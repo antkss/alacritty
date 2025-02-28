@@ -4,7 +4,6 @@ use crate::ConfigMonitor;
 use glutin::config::GetGlConfig;
 use std::borrow::Cow;
 use std::cmp::min;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::ffi::OsStr;
@@ -141,14 +140,14 @@ impl Processor {
     pub fn create_initial_window(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_options: WindowOptions,
     ) -> Result<(), Box<dyn Error>> {
-        let window_context = WindowContext::initial(
-            event_loop,
-            self.proxy.clone(),
-            self.config.clone(),
-            window_options,
-        )?;
+        let options = match self.initial_window_options.take() {
+            Some(options) => options,
+            None => return Ok(()),
+        };
+
+        let window_context =
+            WindowContext::initial(event_loop, self.proxy.clone(), self.config.clone(), options)?;
 
         self.gl_config = Some(window_context.display.gl_context().config());
         self.windows.insert(window_context.id(), window_context);
@@ -226,12 +225,10 @@ impl ApplicationHandler<Event> for Processor {
             return;
         }
 
-        if let Some(window_options) = self.initial_window_options.take() {
-            if let Err(err) = self.create_initial_window(event_loop, window_options) {
-                self.initial_window_error = Some(err);
-                event_loop.exit();
-                return;
-            }
+        if let Err(err) = self.create_initial_window(event_loop) {
+            self.initial_window_error = Some(err);
+            event_loop.exit();
+            return;
         }
 
         info!("Initialisation complete");
@@ -279,7 +276,7 @@ impl ApplicationHandler<Event> for Processor {
         }
 
         // Handle events which don't mandate the WindowId.
-        match (event.payload, event.window_id.as_ref()) {
+        match (&event.payload, event.window_id.as_ref()) {
             // Process IPC config update.
             #[cfg(unix)]
             (EventType::IpcConfig(ipc_config), window_id) => {
@@ -318,7 +315,7 @@ impl ApplicationHandler<Event> for Processor {
                 }
 
                 // Load config and update each terminal.
-                if let Ok(config) = config::reload(&path, &mut self.cli_options) {
+                if let Ok(config) = config::reload(path, &mut self.cli_options) {
                     self.config = Rc::new(config);
 
                     // Restart config monitor if imports changed.
@@ -349,17 +346,17 @@ impl ApplicationHandler<Event> for Processor {
 
                 if self.gl_config.is_none() {
                     // Handle initial window creation in daemon mode.
-                    if let Err(err) = self.create_initial_window(event_loop, options) {
+                    if let Err(err) = self.create_initial_window(event_loop) {
                         self.initial_window_error = Some(err);
                         event_loop.exit();
                     }
-                } else if let Err(err) = self.create_window(event_loop, options) {
+                } else if let Err(err) = self.create_window(event_loop, options.clone()) {
                     error!("Could not open window: {:?}", err);
                 }
             },
             // Process events affecting all windows.
-            (payload, None) => {
-                let event = WinitEvent::UserEvent(Event::new(payload, None));
+            (_, None) => {
+                let event = WinitEvent::UserEvent(event);
                 for window_context in self.windows.values_mut() {
                     window_context.handle_event(
                         #[cfg(target_os = "macos")]
@@ -381,14 +378,9 @@ impl ApplicationHandler<Event> for Processor {
             },
             (EventType::Terminal(TerminalEvent::Exit), Some(window_id)) => {
                 // Remove the closed terminal.
-                let window_context = match self.windows.entry(*window_id) {
-                    // Don't exit when terminal exits if user asked to hold the window.
-                    Entry::Occupied(window_context)
-                        if !window_context.get().display.window.hold =>
-                    {
-                        window_context.remove()
-                    },
-                    _ => return,
+                let window_context = match self.windows.remove(window_id) {
+                    Some(window_context) => window_context,
+                    None => return,
                 };
 
                 // Unschedule pending events.
@@ -413,7 +405,7 @@ impl ApplicationHandler<Event> for Processor {
                     }
                 }
             },
-            (payload, Some(window_id)) => {
+            (_, Some(window_id)) => {
                 if let Some(window_context) = self.windows.get_mut(window_id) {
                     window_context.handle_event(
                         #[cfg(target_os = "macos")]
@@ -421,7 +413,7 @@ impl ApplicationHandler<Event> for Processor {
                         &self.proxy,
                         &mut self.clipboard,
                         &mut self.scheduler,
-                        WinitEvent::UserEvent(Event::new(payload, *window_id)),
+                        WinitEvent::UserEvent(event),
                     );
                 }
             },
@@ -844,8 +836,9 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
     #[cfg(not(windows))]
     fn create_new_window(&mut self, #[cfg(target_os = "macos")] tabbing_id: Option<String>) {
         let mut options = WindowOptions::default();
-        options.terminal_options.working_directory =
-            foreground_process_path(self.master_fd, self.shell_pid).ok();
+        if let Ok(working_directory) = foreground_process_path(self.master_fd, self.shell_pid) {
+            options.terminal_options.working_directory = Some(working_directory);
+        }
 
         #[cfg(target_os = "macos")]
         {
@@ -874,7 +867,7 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
 
         match result {
             Ok(_) => debug!("Launched {} with args {:?}", program, args),
-            Err(err) => warn!("Unable to launch {program} with args {args:?}: {err}"),
+            Err(_) => warn!("Unable to launch {} with args {:?}", program, args),
         }
     }
 
@@ -1148,16 +1141,16 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         }
 
         let hint_bounds = hint.bounds();
-        let text = match hint.text(self.terminal) {
-            Some(text) => text,
-            None => return,
+        let text = match hint.hyperlink() {
+            Some(hyperlink) => hyperlink.uri().to_owned(),
+            None => self.terminal.bounds_to_string(*hint_bounds.start(), *hint_bounds.end()),
         };
 
         match &hint.action() {
             // Launch an external program.
             HintAction::Command(command) => {
                 let mut args = command.args().to_vec();
-                args.push(text.into());
+                args.push(text);
                 self.spawn_daemon(command.program(), &args);
             },
             // Copy the text to the clipboard.
@@ -1188,13 +1181,17 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
     /// Expand the selection to the current mouse cursor position.
     #[inline]
     fn expand_selection(&mut self) {
-        let control = self.modifiers().state().control_key();
         let selection_type = match self.mouse().click_state {
-            ClickState::None => return,
-            _ if control => SelectionType::Block,
-            ClickState::Click => SelectionType::Simple,
+            ClickState::Click => {
+                if self.modifiers().state().control_key() {
+                    SelectionType::Block
+                } else {
+                    SelectionType::Simple
+                }
+            },
             ClickState::DoubleClick => SelectionType::Semantic,
             ClickState::TripleClick => SelectionType::Lines,
+            ClickState::None => return,
         };
 
         // Load mouse point, treating message bar and padding as the closest cell.
@@ -1798,11 +1795,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
             },
             WinitEvent::WindowEvent { event, .. } => {
                 match event {
-                    WindowEvent::CloseRequested => {
-                        // User asked to close the window, so no need to hold it.
-                        self.ctx.window().hold = false;
-                        self.ctx.terminal.exit();
-                    },
+                    WindowEvent::CloseRequested => self.ctx.terminal.exit(),
                     WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                         let old_scale_factor =
                             mem::replace(&mut self.ctx.window().scale_factor, scale_factor);

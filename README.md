@@ -1,12 +1,61 @@
 <p align="center">
-    <img width="200" alt="Alacritty Logo" src="https://raw.githubusercontent.com/alacritty/alacritty/master/extra/logo/compat/alacritty-term%2Bscanlines.png">
+    <img width="200" alt="Alacritty Logo" src="https://raw.githubusercontent.com/gregthemadmonk/alacritty/smooth-cursor/extra/logo/compat/alacritty-term%2Bscanlines.png">
 </p>
 
 <h1 align="center">Alacritty - A fast, cross-platform, OpenGL terminal emulator</h1>
 
+## About this fork!
+
+This fork introduces basic cursor animations to Alacritty in a rather simple way.
+It replaces the block cursor render by a rectangle with a changed blend mode and
+triggers a surface re-render every frame when the window is visible.
+
+Available in AUR: https://aur.archlinux.org/packages/alacritty-smooth-cursor-git
+
+<p align="center">
+    <img width="100%" alt="Alacritty smooth cursor demo" src="https://raw.githubusercontent.com/gregthemadmonk/alacritty/smooth-cursor/extra/demo.gif">
+</p>
+
+## Known issues
+
+* This fork doesn't run well on Wayland (#3 if you want to tackle it). For now,
+  build the application without Wayland support to make it use XWayland:
+  `cargo run --features=x11 --no-default-features`.  I used to recommend
+  unsetting `WAYLAND_DISPLAY` here: __don't do it please__. This will make
+  __all__ applications you start from the terminal ignore your Wayland session.
+* Currently redraws are dumb and update the window every frame even if nothing
+  has changed. Expect a little GPU usage in idle (progress in #2).
+* Block cursor may look really off due to blending hack that essentially just
+  inverts the character color. It is recommended to replace it with "underline"
+  (see config or GIF demo)
+
+### Configure
+
+Add/change the following entries in your `alacritty.toml`:
+
+```toml
+[cursor]
+# Set to false to disable completely
+smooth_motion = true
+# 0.0 = cursor is not moving, 1.0 = cursor moves instantly
+smooth_motion_factor = 0.2
+# 0.0 = broken, 1.0 = cursor shape is unaffected by movement
+smooth_motion_spring = 0.5
+# Limits how the cursor size may change
+smooth_motion_max_stretch_x = 3.0
+smooth_motion_max_stretch_y = 3.0
+# Override "block" cursor if you don't like how it looks in this fork
+# I prefer "underline"
+block_replace_shape = "underline"
+```
+
+_Back to the original README..._
+
+<hr>
+
 <p align="center">
   <img alt="Alacritty - A fast, cross-platform, OpenGL terminal emulator"
-       src="https://raw.githubusercontent.com/alacritty/alacritty/master/extra/promo/alacritty-readme.png">
+       src="extra/promo/alacritty-readme.png">
 </p>
 
 ## About

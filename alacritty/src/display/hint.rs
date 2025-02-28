@@ -1,8 +1,6 @@
-use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::iter;
-use std::rc::Rc;
 
 use ahash::RandomState;
 use winit::keyboard::ModifiersState;
@@ -25,7 +23,7 @@ const HINT_SPLIT_PERCENTAGE: f32 = 0.5;
 /// Keyboard regex hint state.
 pub struct HintState {
     /// Hint currently in use.
-    hint: Option<Rc<Hint>>,
+    hint: Option<Hint>,
 
     /// Alphabet for hint labels.
     alphabet: String,
@@ -58,7 +56,7 @@ impl HintState {
     }
 
     /// Start the hint selection process.
-    pub fn start(&mut self, hint: Rc<Hint>) {
+    pub fn start(&mut self, hint: Hint) {
         self.hint = Some(hint);
     }
 
@@ -152,7 +150,7 @@ impl HintState {
         // Check if the selected label is fully matched.
         if label.len() == 1 {
             let bounds = self.matches[index].clone();
-            let hint = hint.clone();
+            let action = hint.action.clone();
 
             // Exit hint mode unless it requires explicit dismissal.
             if hint.persist {
@@ -163,7 +161,7 @@ impl HintState {
 
             // Hyperlinks take precedence over regex matches.
             let hyperlink = term.grid()[*bounds.start()].hyperlink();
-            Some(HintMatch { bounds, hyperlink, hint })
+            Some(HintMatch { action, bounds, hyperlink })
         } else {
             // Store character to preserve the selection.
             self.keys.push(c);
@@ -194,14 +192,13 @@ impl HintState {
 /// Hint match which was selected by the user.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct HintMatch {
+    /// Action for handling the text.
+    action: HintAction,
+
     /// Terminal range matching the hint.
     bounds: Match,
 
-    /// OSC 8 hyperlink.
     hyperlink: Option<Hyperlink>,
-
-    /// Hint which triggered this match.
-    hint: Rc<Hint>,
 }
 
 impl HintMatch {
@@ -213,7 +210,7 @@ impl HintMatch {
 
     #[inline]
     pub fn action(&self) -> &HintAction {
-        &self.hint.action
+        &self.action
     }
 
     #[inline]
@@ -223,29 +220,6 @@ impl HintMatch {
 
     pub fn hyperlink(&self) -> Option<&Hyperlink> {
         self.hyperlink.as_ref()
-    }
-
-    /// Get the text content of the hint match.
-    ///
-    /// This will always revalidate the hint text, to account for terminal content
-    /// changes since the [`HintMatch`] was constructed. The text of the hint might
-    /// be different from its original value, but it will **always** be a valid
-    /// match for this hint.
-    pub fn text<T>(&self, term: &Term<T>) -> Option<Cow<'_, str>> {
-        // Revalidate hyperlink match.
-        if let Some(hyperlink) = &self.hyperlink {
-            let (validated, bounds) = hyperlink_at(term, *self.bounds.start())?;
-            return (&validated == hyperlink && bounds == self.bounds)
-                .then(|| hyperlink.uri().into());
-        }
-
-        // Revalidate regex match.
-        let regex = self.hint.content.regex.as_ref()?;
-        let bounds = regex.with_compiled(|regex| {
-            regex_match_at(term, *self.bounds.start(), regex, self.hint.post_processing)
-        })??;
-        (bounds == self.bounds)
-            .then(|| term.bounds_to_string(*bounds.start(), *bounds.end()).into())
     }
 }
 
@@ -408,14 +382,18 @@ pub fn highlighted_at<T>(
         if let Some((hyperlink, bounds)) =
             hint.content.hyperlinks.then(|| hyperlink_at(term, point)).flatten()
         {
-            return Some(HintMatch { bounds, hyperlink: Some(hyperlink), hint: hint.clone() });
+            return Some(HintMatch {
+                bounds,
+                action: hint.action.clone(),
+                hyperlink: Some(hyperlink),
+            });
         }
 
         let bounds = hint.content.regex.as_ref().and_then(|regex| {
             regex.with_compiled(|regex| regex_match_at(term, point, regex, hint.post_processing))
         });
         if let Some(bounds) = bounds.flatten() {
-            return Some(HintMatch { bounds, hint: hint.clone(), hyperlink: None });
+            return Some(HintMatch { bounds, action: hint.action.clone(), hyperlink: None });
         }
 
         None
@@ -576,7 +554,7 @@ impl<'a, T> HintPostProcessor<'a, T> {
     }
 }
 
-impl<T> Iterator for HintPostProcessor<'_, T> {
+impl<'a, T> Iterator for HintPostProcessor<'a, T> {
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {

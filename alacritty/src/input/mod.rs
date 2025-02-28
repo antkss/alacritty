@@ -324,10 +324,7 @@ impl<T: EventListener> Execute<T> for Action {
             #[cfg(not(target_os = "macos"))]
             Action::Hide => ctx.window().set_visible(false),
             Action::Minimize => ctx.window().set_minimized(true),
-            Action::Quit => {
-                ctx.window().hold = false;
-                ctx.terminal_mut().exit();
-            },
+            Action::Quit => ctx.terminal_mut().exit(),
             Action::IncreaseFontSize => ctx.change_font_size(FONT_SIZE_STEP),
             Action::DecreaseFontSize => ctx.change_font_size(-FONT_SIZE_STEP),
             Action::ResetFontSize => ctx.reset_font_size(),
@@ -640,7 +637,6 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
     /// Handle left click selection and vi mode cursor movement.
     fn on_left_click(&mut self, point: Point) {
         let side = self.ctx.mouse().cell_side;
-        let control = self.ctx.modifiers().state().control_key();
 
         match self.ctx.mouse().click_state {
             ClickState::Click => {
@@ -650,21 +646,21 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 self.ctx.clear_selection();
 
                 // Start new empty selection.
-                if control {
+                if self.ctx.modifiers().state().control_key() {
                     self.ctx.start_selection(SelectionType::Block, point, side);
                 } else {
                     self.ctx.start_selection(SelectionType::Simple, point, side);
                 }
             },
-            ClickState::DoubleClick if !control => {
+            ClickState::DoubleClick => {
                 self.ctx.mouse_mut().block_hint_launcher = true;
                 self.ctx.start_selection(SelectionType::Semantic, point, side);
             },
-            ClickState::TripleClick if !control => {
+            ClickState::TripleClick => {
                 self.ctx.mouse_mut().block_hint_launcher = true;
                 self.ctx.start_selection(SelectionType::Lines, point, side);
             },
-            _ => (),
+            ClickState::None => (),
         };
 
         // Move vi mode cursor to mouse click position.
@@ -1140,7 +1136,7 @@ mod tests {
         inline_search_state: &'a mut InlineSearchState,
     }
 
-    impl<T: EventListener> super::ActionContext<T> for ActionContext<'_, T> {
+    impl<'a, T: EventListener> super::ActionContext<T> for ActionContext<'a, T> {
         fn search_next(
             &mut self,
             _origin: Point,

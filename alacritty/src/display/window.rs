@@ -2,8 +2,6 @@
 use winit::platform::startup_notify::{
     self, EventLoopExtStartupNotify, WindowAttributesExtStartupNotify,
 };
-#[cfg(not(any(target_os = "macos", windows)))]
-use winit::window::ActivationToken;
 
 #[cfg(all(not(feature = "x11"), not(any(target_os = "macos", windows))))]
 use winit::platform::wayland::WindowAttributesExtWayland;
@@ -22,8 +20,9 @@ use std::fmt::{self, Display, Formatter};
 
 #[cfg(target_os = "macos")]
 use {
-    objc2_app_kit::{NSColorSpace, NSView},
-    objc2_foundation::is_main_thread,
+    cocoa::appkit::NSColorSpace,
+    cocoa::base::{id, nil, NO, YES},
+    objc::{msg_send, sel, sel_impl},
     winit::platform::macos::{OptionAsAlt, WindowAttributesExtMacOS, WindowExtMacOS},
 };
 
@@ -40,14 +39,13 @@ use winit::window::{
 
 use alacritty_terminal::index::Point;
 
-use crate::cli::WindowOptions;
 use crate::config::window::{Decorations, Identity, WindowConfig};
 use crate::config::UiConfig;
 use crate::display::SizeInfo;
 
 /// Window icon for `_NET_WM_ICON` property.
 #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
-const WINDOW_ICON: &[u8] = include_bytes!("../../extra/logo/compat/alacritty-term.png");
+static WINDOW_ICON: &[u8] = include_bytes!("../../extra/logo/compat/alacritty-term.png");
 
 /// This should match the definition of IDI_ICON from `alacritty.rc`.
 #[cfg(windows)]
@@ -109,9 +107,6 @@ pub struct Window {
     /// Flag indicating whether redraw was requested.
     pub requested_redraw: bool,
 
-    /// Hold the window when terminal exits.
-    pub hold: bool,
-
     window: WinitWindow,
 
     /// Current window title.
@@ -130,7 +125,9 @@ impl Window {
         event_loop: &ActiveEventLoop,
         config: &UiConfig,
         identity: &Identity,
-        options: &mut WindowOptions,
+        #[rustfmt::skip]
+        #[cfg(target_os = "macos")]
+        tabbing_id: &Option<String>,
         #[rustfmt::skip]
         #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
         x11_visual: Option<X11VisualInfo>,
@@ -142,7 +139,7 @@ impl Window {
             #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
             x11_visual,
             #[cfg(target_os = "macos")]
-            &options.window_tabbing_id.take(),
+            tabbing_id,
         );
 
         if let Some(position) = config.window.position {
@@ -151,12 +148,7 @@ impl Window {
         }
 
         #[cfg(not(any(target_os = "macos", windows)))]
-        if let Some(token) = options
-            .activation_token
-            .take()
-            .map(ActivationToken::from_raw)
-            .or_else(|| event_loop.read_token_from_env())
-        {
+        if let Some(token) = event_loop.read_token_from_env() {
             log::debug!("Activating window with token: {token:?}");
             window_attributes = window_attributes.with_activation_token(token);
 
@@ -178,8 +170,7 @@ impl Window {
             .with_transparent(true)
             .with_blur(config.window.blur)
             .with_maximized(config.window.maximized())
-            .with_fullscreen(config.window.fullscreen())
-            .with_window_level(config.window.level.into());
+            .with_fullscreen(config.window.fullscreen());
 
         let window = event_loop.create_window(window_attributes)?;
 
@@ -202,7 +193,6 @@ impl Window {
         let is_x11 = matches!(window.window_handle().unwrap().as_raw(), RawWindowHandle::Xlib(_));
 
         Ok(Self {
-            hold: options.terminal_options.hold,
             requested_redraw: false,
             title: identity.title,
             current_mouse_cursor,
@@ -232,12 +222,6 @@ impl Window {
     #[inline]
     pub fn set_visible(&self, visibility: bool) {
         self.window.set_visible(visibility);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[inline]
-    pub fn focus_window(&self) {
-        self.window.focus_window();
     }
 
     /// Set the window title.
@@ -461,15 +445,16 @@ impl Window {
     /// This prevents rendering artifacts from showing up when the window is transparent.
     #[cfg(target_os = "macos")]
     pub fn set_has_shadow(&self, has_shadows: bool) {
-        let view = match self.raw_window_handle() {
-            RawWindowHandle::AppKit(handle) => {
-                assert!(is_main_thread());
-                unsafe { handle.ns_view.cast::<NSView>().as_ref() }
-            },
+        let ns_view = match self.raw_window_handle() {
+            RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr() as id,
             _ => return,
         };
 
-        view.window().unwrap().setHasShadow(has_shadows);
+        let value = if has_shadows { YES } else { NO };
+        unsafe {
+            let ns_window: id = msg_send![ns_view, window];
+            let _: id = msg_send![ns_window, setHasShadow: value];
+        }
     }
 
     /// Select tab at the given `index`.
@@ -504,15 +489,13 @@ impl Window {
 
 #[cfg(target_os = "macos")]
 fn use_srgb_color_space(window: &WinitWindow) {
-    let view = match window.window_handle().unwrap().as_raw() {
-        RawWindowHandle::AppKit(handle) => {
-            assert!(is_main_thread());
-            unsafe { handle.ns_view.cast::<NSView>().as_ref() }
-        },
+    let ns_view = match window.window_handle().unwrap().as_raw() {
+        RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr() as id,
         _ => return,
     };
 
     unsafe {
-        view.window().unwrap().setColorSpace(Some(&NSColorSpace::sRGBColorSpace()));
+        let ns_window: id = msg_send![ns_view, window];
+        let _: () = msg_send![ns_window, setColorSpace: NSColorSpace::sRGBColorSpace(nil)];
     }
 }

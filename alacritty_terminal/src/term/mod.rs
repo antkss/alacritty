@@ -199,7 +199,7 @@ impl<'a> TermDamageIterator<'a> {
     }
 }
 
-impl Iterator for TermDamageIterator<'_> {
+impl<'a> Iterator for TermDamageIterator<'a> {
     type Item = LineDamageBounds;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -930,11 +930,6 @@ impl<T> Term<T> {
         &self.config.semantic_escape_chars
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_semantic_escape_chars(&mut self, semantic_escape_chars: &str) {
-        self.config.semantic_escape_chars = semantic_escape_chars.into();
-    }
-
     /// Active terminal cursor style.
     ///
     /// While vi mode is active, this will automatically return the vi mode cursor style.
@@ -1566,15 +1561,11 @@ impl<T: EventListener> Handler for Term<T> {
     #[inline]
     fn move_backward_tabs(&mut self, count: u16) {
         trace!("Moving backward {} tabs", count);
+        self.damage_cursor();
 
         let old_col = self.grid.cursor.point.column.0;
         for _ in 0..count {
             let mut col = self.grid.cursor.point.column;
-
-            if col == 0 {
-                break;
-            }
-
             for i in (0..(col.0)).rev() {
                 if self.tabs[index::Column(i)] {
                     col = index::Column(i);
@@ -1590,29 +1581,7 @@ impl<T: EventListener> Handler for Term<T> {
 
     #[inline]
     fn move_forward_tabs(&mut self, count: u16) {
-        trace!("Moving forward {} tabs", count);
-
-        let num_cols = self.columns();
-        let old_col = self.grid.cursor.point.column.0;
-        for _ in 0..count {
-            let mut col = self.grid.cursor.point.column;
-
-            if col == num_cols - 1 {
-                break;
-            }
-
-            for i in col.0 + 1..num_cols {
-                col = index::Column(i);
-                if self.tabs[col] {
-                    break;
-                }
-            }
-
-            self.grid.cursor.point.column = col;
-        }
-
-        let line = self.grid.cursor.point.line.0 as usize;
-        self.damage.damage_line(line, old_col, self.grid.cursor.point.column.0);
+        trace!("[unimplemented] Moving forward {} tabs", count);
     }
 
     #[inline]

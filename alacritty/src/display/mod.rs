@@ -5,13 +5,10 @@ use std::cmp;
 use std::fmt::{self, Formatter};
 use std::mem::{self, ManuallyDrop};
 use std::num::NonZeroU32;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
-use glutin::config::GetGlConfig;
 use glutin::context::{NotCurrentContext, PossiblyCurrentContext};
-use glutin::display::GetGlDisplay;
-use glutin::error::ErrorKind;
 use glutin::prelude::*;
 use glutin::surface::{Surface, SwapInterval, WindowSurface};
 
@@ -36,7 +33,6 @@ use alacritty_terminal::term::{
 };
 use alacritty_terminal::vte::ansi::{CursorShape, NamedColor};
 
-use crate::config::debug::RendererPreference;
 use crate::config::font::Font;
 use crate::config::window::Dimensions;
 #[cfg(not(windows))]
@@ -45,6 +41,7 @@ use crate::config::UiConfig;
 use crate::display::bell::VisualBell;
 use crate::display::color::{List, Rgb};
 use crate::display::content::{RenderableContent, RenderableCursor};
+use crate::display::cursor::CursorRects;
 use crate::display::cursor::IntoRects;
 use crate::display::damage::{damage_y_to_viewport_y, DamageTracker};
 use crate::display::hint::{HintMatch, HintState};
@@ -53,7 +50,7 @@ use crate::display::window::Window;
 use crate::event::{Event, EventType, Mouse, SearchState};
 use crate::message_bar::{MessageBuffer, MessageType};
 use crate::renderer::rects::{RenderLine, RenderLines, RenderRect};
-use crate::renderer::{self, platform, GlyphCache, Renderer};
+use crate::renderer::{self, GlyphCache, Renderer};
 use crate::scheduler::{Scheduler, TimerId, Topic};
 use crate::string::{ShortenDirection, StrShortener};
 
@@ -389,14 +386,16 @@ pub struct Display {
     hint_mouse_point: Option<Point>,
 
     renderer: ManuallyDrop<Renderer>,
-    renderer_preference: Option<RendererPreference>,
 
     surface: ManuallyDrop<Surface<WindowSurface>>,
 
-    context: ManuallyDrop<PossiblyCurrentContext>,
+    context: ManuallyDrop<Replaceable<PossiblyCurrentContext>>,
 
     glyph_cache: GlyphCache,
     meter: Meter,
+
+    // Old cursor
+    cursor_rects: Option<CursorRects>,
 }
 
 impl Display {
@@ -426,7 +425,7 @@ impl Display {
         }
 
         // Create the GL surface to draw into.
-        let surface = platform::create_gl_surface(
+        let surface = renderer::platform::create_gl_surface(
             &gl_context,
             window.inner_size(),
             window.raw_window_handle(),
@@ -489,10 +488,6 @@ impl Display {
 
         window.set_visible(true);
 
-        // Always focus new windows, even if no Alacritty window is currently focused.
-        #[cfg(target_os = "macos")]
-        window.focus_window();
-
         #[allow(clippy::single_match)]
         #[cfg(not(windows))]
         if !_tabbed {
@@ -515,10 +510,9 @@ impl Display {
         }
 
         Ok(Self {
-            context: ManuallyDrop::new(context),
+            context: ManuallyDrop::new(Replaceable::new(context)),
             visual_bell: VisualBell::from(&config.bell),
             renderer: ManuallyDrop::new(renderer),
-            renderer_preference: config.debug.renderer,
             surface: ManuallyDrop::new(surface),
             colors: List::from(&config.colors),
             frame_timer: FrameTimer::new(),
@@ -539,74 +533,35 @@ impl Display {
             cursor_hidden: Default::default(),
             meter: Default::default(),
             ime: Default::default(),
+            cursor_rects: None,
         })
     }
 
     #[inline]
     pub fn gl_context(&self) -> &PossiblyCurrentContext {
-        &self.context
+        self.context.get()
     }
 
     pub fn make_not_current(&mut self) {
-        if self.context.is_current() {
-            self.context.make_not_current_in_place().expect("failed to disable context");
+        if self.context.get().is_current() {
+            self.context.replace_with(|context| {
+                context
+                    .make_not_current()
+                    .expect("failed to disable context")
+                    .treat_as_possibly_current()
+            });
         }
     }
 
-    pub fn make_current(&mut self) {
-        let is_current = self.context.is_current();
-
-        // Attempt to make the context current if it's not.
-        let context_loss = if is_current {
-            self.renderer.was_context_reset()
-        } else {
-            match self.context.make_current(&self.surface) {
-                Err(err) if err.error_kind() == ErrorKind::ContextLost => {
-                    info!("Context lost for window {:?}", self.window.id());
-                    true
-                },
-                _ => false,
-            }
-        };
-
-        if !context_loss {
-            return;
+    pub fn make_current(&self) {
+        if !self.context.get().is_current() {
+            self.context.make_current(&self.surface).expect("failed to make context current")
         }
-
-        let gl_display = self.context.display();
-        let gl_config = self.context.config();
-        let raw_window_handle = Some(self.window.raw_window_handle());
-        let context = platform::create_gl_context(&gl_display, &gl_config, raw_window_handle)
-            .expect("failed to recreate context.");
-
-        // Drop the old context and renderer.
-        unsafe {
-            ManuallyDrop::drop(&mut self.renderer);
-            ManuallyDrop::drop(&mut self.context);
-        }
-
-        // Activate new context.
-        let context = context.treat_as_possibly_current();
-        self.context = ManuallyDrop::new(context);
-        self.context.make_current(&self.surface).expect("failed to reativate context after reset.");
-
-        // Recreate renderer.
-        let renderer = Renderer::new(&self.context, self.renderer_preference)
-            .expect("failed to recreate renderer after reset");
-        self.renderer = ManuallyDrop::new(renderer);
-
-        // Resize the renderer.
-        self.renderer.resize(&self.size_info);
-
-        self.reset_glyph_cache();
-        self.damage_tracker.frame().mark_fully_damaged();
-
-        debug!("Recovered window {:?} from gpu reset", self.window.id());
     }
 
     fn swap_buffers(&self) {
         #[allow(clippy::single_match)]
-        let res = match (self.surface.deref(), &self.context.deref()) {
+        let res = match (self.surface.deref(), &self.context.get()) {
             #[cfg(not(any(target_os = "macos", windows)))]
             (Surface::Egl(surface), PossiblyCurrentContext::Egl(context))
                 if matches!(self.raw_window_handle, RawWindowHandle::Wayland(_))
@@ -893,7 +848,26 @@ impl Display {
         };
 
         // Draw cursor.
-        rects.extend(cursor.rects(&size_info, config.cursor.thickness()));
+        let block_rep_shape = config.cursor.block_replace_shape().map(|x| x.shape);
+        let new_cur_rects =
+            cursor.rects(&size_info, config.cursor.thickness(), block_rep_shape);
+        if config.cursor.smooth_motion {
+            match self.cursor_rects {
+                None =>
+                    self.cursor_rects = Some(new_cur_rects),
+                Some(ref mut crcts) =>
+                    crcts.interpolate(
+                        &new_cur_rects,
+                        config.cursor.smooth_motion_factor,
+                        config.cursor.smooth_motion_spring,
+                        config.cursor.smooth_motion_max_stretch_x,
+                        config.cursor.smooth_motion_max_stretch_y
+                    ),
+            };
+        } else {
+            self.cursor_rects = Some(new_cur_rects);
+        }
+        rects.extend(self.cursor_rects.unwrap());
 
         // Push visual bell after url/underline/strikeout rects.
         let visual_bell_intensity = self.visual_bell.intensity();
@@ -933,7 +907,7 @@ impl Display {
                     let cursor_width = NonZeroU32::new(1).unwrap();
                     let cursor =
                         RenderableCursor::new(Point::new(line, column), shape, fg, cursor_width);
-                    rects.extend(cursor.rects(&size_info, config.cursor.thickness()));
+                    rects.extend(cursor.rects(&size_info, config.cursor.thickness(), block_rep_shape));
                 }
 
                 Some(Point::new(line, column))
@@ -1203,7 +1177,7 @@ impl Display {
                 );
                 let cursor_point = Point::new(point.line, cursor_column);
                 let cursor = RenderableCursor::new(cursor_point, shape, fg, width);
-                rects.extend(cursor.rects(&self.size_info, config.cursor.thickness()));
+                rects.extend(cursor.rects(&self.size_info, config.cursor.thickness(), None));
                 cursor_point
             },
             _ => end,
@@ -1395,8 +1369,6 @@ impl Display {
             (&mut self.highlighted_hint, &mut self.highlighted_hint_age, true),
             (&mut self.vi_highlighted_hint, &mut self.vi_highlighted_hint_age, false),
         ];
-
-        let num_lines = self.size_info.screen_lines();
         for (hint, hint_age, reset_mouse) in hints {
             let (start, end) = match hint {
                 Some(hint) => (*hint.bounds().start(), *hint.bounds().end()),
@@ -1410,12 +1382,10 @@ impl Display {
             }
 
             // Convert hint bounds to viewport coordinates.
-            let start = term::point_to_viewport(display_offset, start)
-                .filter(|point| point.line < num_lines)
-                .unwrap_or_default();
-            let end = term::point_to_viewport(display_offset, end)
-                .filter(|point| point.line < num_lines)
-                .unwrap_or_else(|| Point::new(num_lines - 1, self.size_info.last_column()));
+            let start = term::point_to_viewport(display_offset, start).unwrap_or_default();
+            let end = term::point_to_viewport(display_offset, end).unwrap_or_else(|| {
+                Point::new(self.size_info.screen_lines() - 1, self.size_info.last_column())
+            });
 
             // Clear invalidated hints.
             if frame.intersects(start, end) {
@@ -1548,6 +1518,47 @@ pub struct RendererUpdate {
 
     /// Clear font caches.
     clear_font_cache: bool,
+}
+
+/// Struct for safe in-place replacement.
+///
+/// This struct allows easily replacing struct fields that provide `self -> Self` methods in-place,
+/// without having to deal with constantly unwrapping the underlying [`Option`].
+struct Replaceable<T>(Option<T>);
+
+impl<T> Replaceable<T> {
+    pub fn new(inner: T) -> Self {
+        Self(Some(inner))
+    }
+
+    /// Replace the contents of the container.
+    pub fn replace_with<F: FnMut(T) -> T>(&mut self, f: F) {
+        self.0 = self.0.take().map(f);
+    }
+
+    /// Get immutable access to the wrapped value.
+    pub fn get(&self) -> &T {
+        self.0.as_ref().unwrap()
+    }
+
+    /// Get mutable access to the wrapped value.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.0.as_mut().unwrap()
+    }
+}
+
+impl<T> Deref for Replaceable<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+impl<T> DerefMut for Replaceable<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get_mut()
+    }
 }
 
 /// The frame timer state.

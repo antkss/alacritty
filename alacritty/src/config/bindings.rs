@@ -5,7 +5,6 @@ use std::fmt::{self, Debug, Display};
 use bitflags::bitflags;
 use serde::de::{self, Error as SerdeError, MapAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
-use std::rc::Rc;
 use toml::Value as SerdeValue;
 use winit::event::MouseButton;
 use winit::keyboard::{
@@ -97,7 +96,7 @@ pub enum Action {
 
     /// Regex keyboard hints.
     #[config(skip)]
-    Hint(Rc<Hint>),
+    Hint(Hint),
 
     /// Move vi mode cursor.
     #[config(skip)]
@@ -791,7 +790,7 @@ impl<'a> Deserialize<'a> for ModeWrapper {
     {
         struct ModeVisitor;
 
-        impl Visitor<'_> for ModeVisitor {
+        impl<'a> Visitor<'a> for ModeVisitor {
             type Value = ModeWrapper;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -845,7 +844,7 @@ impl<'a> Deserialize<'a> for MouseButtonWrapper {
     {
         struct MouseButtonVisitor;
 
-        impl Visitor<'_> for MouseButtonVisitor {
+        impl<'a> Visitor<'a> for MouseButtonVisitor {
             type Value = MouseButtonWrapper;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -957,7 +956,7 @@ impl<'a> Deserialize<'a> for RawBinding {
             {
                 struct FieldVisitor;
 
-                impl Visitor<'_> for FieldVisitor {
+                impl<'a> Visitor<'a> for FieldVisitor {
                     type Value = Field;
 
                     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1205,7 +1204,7 @@ impl<'a> de::Deserialize<'a> for ModsWrapper {
     {
         struct ModsVisitor;
 
-        impl Visitor<'_> for ModsVisitor {
+        impl<'a> Visitor<'a> for ModsVisitor {
             type Value = ModsWrapper;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

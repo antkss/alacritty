@@ -20,8 +20,8 @@ use super::{
 };
 
 // Shader source.
-const TEXT_SHADER_F: &str = include_str!("../../../res/gles2/text.f.glsl");
-const TEXT_SHADER_V: &str = include_str!("../../../res/gles2/text.v.glsl");
+static TEXT_SHADER_F: &str = include_str!("../../../res/gles2/text.f.glsl");
+static TEXT_SHADER_V: &str = include_str!("../../../res/gles2/text.v.glsl");
 
 #[derive(Debug)]
 pub struct Gles2Renderer {
@@ -346,7 +346,7 @@ pub struct RenderApi<'a> {
     dual_source_blending: bool,
 }
 
-impl Drop for RenderApi<'_> {
+impl<'a> Drop for RenderApi<'a> {
     fn drop(&mut self) {
         if !self.batch.is_empty() {
             self.render_batch();
@@ -354,7 +354,7 @@ impl Drop for RenderApi<'_> {
     }
 }
 
-impl LoadGlyph for RenderApi<'_> {
+impl<'a> LoadGlyph for RenderApi<'a> {
     fn load_glyph(&mut self, rasterized: &RasterizedGlyph) -> Glyph {
         Atlas::load_glyph(self.active_tex, self.atlas, self.current_atlas, rasterized)
     }
@@ -364,7 +364,7 @@ impl LoadGlyph for RenderApi<'_> {
     }
 }
 
-impl TextRenderApi<Batch> for RenderApi<'_> {
+impl<'a> TextRenderApi<Batch> for RenderApi<'a> {
     fn batch(&mut self) -> &mut Batch {
         self.batch
     }

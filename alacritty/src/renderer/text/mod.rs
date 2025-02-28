@@ -186,7 +186,7 @@ pub struct LoaderApi<'a> {
     current_atlas: &'a mut usize,
 }
 
-impl LoadGlyph for LoaderApi<'_> {
+impl<'a> LoadGlyph for LoaderApi<'a> {
     fn load_glyph(&mut self, rasterized: &RasterizedGlyph) -> Glyph {
         Atlas::load_glyph(self.active_tex, self.atlas, self.current_atlas, rasterized)
     }

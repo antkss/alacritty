@@ -1,7 +1,6 @@
 use std::ffi::c_void;
 use std::io::Error;
 use std::num::NonZeroU32;
-use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -51,7 +50,7 @@ pub struct ChildExitWatcher {
     wait_handle: AtomicPtr<c_void>,
     event_rx: mpsc::Receiver<ChildEvent>,
     interest: Arc<Mutex<Option<Interest>>>,
-    child_handle: AtomicPtr<c_void>,
+    child_handle: HANDLE,
     pid: Option<NonZeroU32>,
 }
 
@@ -59,12 +58,12 @@ impl ChildExitWatcher {
     pub fn new(child_handle: HANDLE) -> Result<ChildExitWatcher, Error> {
         let (event_tx, event_rx) = mpsc::channel();
 
-        let mut wait_handle: HANDLE = ptr::null_mut();
+        let mut wait_handle: HANDLE = 0;
         let interest = Arc::new(Mutex::new(None));
         let sender_ref = Box::new(ChildExitSender {
             sender: event_tx,
             interest: interest.clone(),
-            child_handle: AtomicPtr::from(child_handle),
+            child_handle: AtomicPtr::from(child_handle as *mut c_void),
         });
 
         let success = unsafe {
@@ -83,11 +82,11 @@ impl ChildExitWatcher {
         } else {
             let pid = unsafe { NonZeroU32::new(GetProcessId(child_handle)) };
             Ok(ChildExitWatcher {
+                wait_handle: AtomicPtr::from(wait_handle as *mut c_void),
                 event_rx,
                 interest,
+                child_handle,
                 pid,
-                child_handle: AtomicPtr::from(child_handle),
-                wait_handle: AtomicPtr::from(wait_handle),
             })
         }
     }
@@ -113,7 +112,7 @@ impl ChildExitWatcher {
     /// If you terminate the process using this handle, the terminal will get a
     /// timeout error, and the child watcher will emit an `Exited` event.
     pub fn raw_handle(&self) -> HANDLE {
-        self.child_handle.load(Ordering::Relaxed) as HANDLE
+        self.child_handle
     }
 
     /// Retrieve the Process ID associated to the underlying child process.

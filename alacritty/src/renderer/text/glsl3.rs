@@ -20,8 +20,8 @@ use super::{
 };
 
 // Shader source.
-pub const TEXT_SHADER_F: &str = include_str!("../../../res/glsl3/text.f.glsl");
-const TEXT_SHADER_V: &str = include_str!("../../../res/glsl3/text.v.glsl");
+pub static TEXT_SHADER_F: &str = include_str!("../../../res/glsl3/text.f.glsl");
+static TEXT_SHADER_V: &str = include_str!("../../../res/glsl3/text.v.glsl");
 
 /// Maximum items to be drawn in a batch.
 const BATCH_MAX: usize = 0x1_0000;
@@ -215,7 +215,7 @@ pub struct RenderApi<'a> {
     program: &'a mut TextShaderProgram,
 }
 
-impl TextRenderApi<Batch> for RenderApi<'_> {
+impl<'a> TextRenderApi<Batch> for RenderApi<'a> {
     fn batch(&mut self) -> &mut Batch {
         self.batch
     }
@@ -261,7 +261,7 @@ impl TextRenderApi<Batch> for RenderApi<'_> {
     }
 }
 
-impl LoadGlyph for RenderApi<'_> {
+impl<'a> LoadGlyph for RenderApi<'a> {
     fn load_glyph(&mut self, rasterized: &RasterizedGlyph) -> Glyph {
         Atlas::load_glyph(self.active_tex, self.atlas, self.current_atlas, rasterized)
     }
@@ -271,7 +271,7 @@ impl LoadGlyph for RenderApi<'_> {
     }
 }
 
-impl Drop for RenderApi<'_> {
+impl<'a> Drop for RenderApi<'a> {
     fn drop(&mut self) {
         if !self.batch.is_empty() {
             self.render_batch();
