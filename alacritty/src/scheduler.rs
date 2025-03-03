@@ -95,6 +95,9 @@ impl Scheduler {
         let index = self.timers.iter().position(|timer| timer.id == id)?;
         self.timers.remove(index)
     }
+    pub fn check_exist(&mut self, id: TimerId) -> bool {
+        self.timers.iter().any(|timer| timer.id == id)
+    }
 
     /// Check if a timer is already scheduled.
     pub fn scheduled(&mut self, id: TimerId) -> bool {

@@ -376,13 +376,17 @@ impl ApplicationHandler<Event> for Processor {
                 }
             },
             (EventType::Terminal(TerminalEvent::Wakeup), Some(window_id)) => {
-                if self.is_set_trail == false && self.now <= 1 {
-                    let timer_id = TimerId::new(Topic::CursorTrail, *window_id);
+                let timer_id = TimerId::new(Topic::CursorTrail, *window_id);
+                let is_exist: bool = self.scheduler.check_exist(timer_id);
+                // println!("is_exist: {}", is_exist);
+                if self.now <= 1 && self.is_set_trail == false && is_exist == false {
                     let event = Event::new(EventType::CursorTrail, *window_id);
                     let interval = Duration::from_millis(15);
                     self.scheduler.schedule(event, interval, true, timer_id);
-                    self.is_set_trail = true
                 }
+                self.now = 0;
+                // println!("lmaodark {}", self.now);
+                // println!("is trail: {}", self.is_set_trail);
                 if let Some(window_context) = self.windows.get_mut(window_id) {
                     window_context.dirty = true;
                     if window_context.display.window.has_frame {
@@ -663,7 +667,6 @@ pub struct ActionContext<'a, N, T> {
 impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionContext<'a, N, T> {
     #[inline]
     fn write_to_pty<B: Into<Cow<'static, [u8]>>>(&self, val: B) {
-        // println!("lmaodark");
         self.notifier.notify(val);
     }
 
@@ -1749,14 +1752,16 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
+                    // println!("now  {}",*self.ctx.now);
+                    *self.ctx.is_set_trail = true;
                     if *self.ctx.now >= 200 {
-                        // println!("stop schedule");
+                        println!("stop schedule");
                         let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
                         self.ctx.scheduler.unschedule(timer_id);
                         *self.ctx.now = 0;
-                        *self.ctx.is_set_trail = false
                     }
                     *self.ctx.now += 1;
+                    *self.ctx.is_set_trail = false;
                 },
                 EventType::BlinkCursorTimeout => {
                     // Disable blinking after timeout reached.
