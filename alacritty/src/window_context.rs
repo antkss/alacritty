@@ -397,6 +397,7 @@ impl WindowContext {
         clipboard: &mut Clipboard,
         scheduler: &mut Scheduler,
         event: WinitEvent<Event>,
+        now: &mut u32,
     ) {
         match event {
             WinitEvent::AboutToWait
@@ -442,6 +443,7 @@ impl WindowContext {
             event_loop,
             clipboard,
             scheduler,
+            now,
         };
         let mut processor = input::Processor::new(context);
 

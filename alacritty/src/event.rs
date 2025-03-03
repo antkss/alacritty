@@ -87,6 +87,7 @@ pub struct Processor {
     global_ipc_options: ParsedOptions,
     cli_options: CliOptions,
     config: Rc<UiConfig>,
+    now: u32,
 }
 
 impl Processor {
@@ -130,6 +131,7 @@ impl Processor {
             #[cfg(unix)]
             global_ipc_options: Default::default(),
             config_monitor,
+            now: 0,
         }
     }
 
@@ -263,6 +265,7 @@ impl ApplicationHandler<Event> for Processor {
             &mut self.clipboard,
             &mut self.scheduler,
             WinitEvent::WindowEvent { window_id, event },
+            &mut self.now,
         );
 
         if is_redraw {
@@ -365,6 +368,7 @@ impl ApplicationHandler<Event> for Processor {
                         &mut self.clipboard,
                         &mut self.scheduler,
                         event.clone(),
+                        &mut self.now,
                     );
                 }
             },
@@ -414,6 +418,7 @@ impl ApplicationHandler<Event> for Processor {
                         &mut self.clipboard,
                         &mut self.scheduler,
                         WinitEvent::UserEvent(event),
+                        &mut self.now,
                     );
                 }
             },
@@ -434,6 +439,7 @@ impl ApplicationHandler<Event> for Processor {
                 &mut self.clipboard,
                 &mut self.scheduler,
                 WinitEvent::AboutToWait,
+                &mut self.now,
             );
         }
 
@@ -638,6 +644,7 @@ pub struct ActionContext<'a, N, T> {
     pub master_fd: RawFd,
     #[cfg(not(windows))]
     pub shell_pid: u32,
+    pub now: &'a mut u32,
 }
 
 impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionContext<'a, N, T> {
@@ -1725,7 +1732,14 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-                    *self.ctx.dirty = true;
+                    println!("lmaodark {}", self.ctx.now);
+                    if *self.ctx.now == 200 {
+                        println!("stop schedule");
+                        let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
+                        self.ctx.scheduler.unschedule(timer_id);
+                        *self.ctx.now = 0;
+                    }
+                    *self.ctx.now += 1;
                 },
                 EventType::BlinkCursorTimeout => {
                     // Disable blinking after timeout reached.
@@ -1830,6 +1844,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         self.ctx.display.pending_update.set_dimensions(size);
                     },
                     WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => {
+                        if *self.ctx.now == 0 {
+                            self.ctx.schedule_trail(15);
+                        }
                         self.key_input(event);
                     },
                     WindowEvent::ModifiersChanged(modifiers) => self.modifiers_input(modifiers),
