@@ -363,6 +363,7 @@ impl WindowContext {
         }
 
         if !self.config.cursor.smooth_motion { self.dirty = false; }
+        // println!("lmaodark");
 
         // Force the display to process any pending display update.
         self.display.process_renderer_update();
@@ -398,6 +399,8 @@ impl WindowContext {
         scheduler: &mut Scheduler,
         event: WinitEvent<Event>,
         now: &mut u32,
+        is_set_trail: &mut bool,
+
     ) {
         match event {
             WinitEvent::AboutToWait
@@ -415,6 +418,7 @@ impl WindowContext {
             },
         }
 
+        // println!("lmaodark");
         let mut terminal = self.terminal.lock();
 
         let old_is_searching = self.search_state.history_index.is_some();
@@ -444,6 +448,7 @@ impl WindowContext {
             clipboard,
             scheduler,
             now,
+            is_set_trail,
         };
         let mut processor = input::Processor::new(context);
 

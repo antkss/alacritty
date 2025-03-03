@@ -88,6 +88,7 @@ pub struct Processor {
     cli_options: CliOptions,
     config: Rc<UiConfig>,
     now: u32,
+    is_set_trail: bool,
 }
 
 impl Processor {
@@ -132,6 +133,7 @@ impl Processor {
             global_ipc_options: Default::default(),
             config_monitor,
             now: 0,
+            is_set_trail: false,
         }
     }
 
@@ -257,7 +259,6 @@ impl ApplicationHandler<Event> for Processor {
         };
 
         let is_redraw = matches!(event, WindowEvent::RedrawRequested);
-
         window_context.handle_event(
             #[cfg(target_os = "macos")]
             _event_loop,
@@ -266,6 +267,7 @@ impl ApplicationHandler<Event> for Processor {
             &mut self.scheduler,
             WinitEvent::WindowEvent { window_id, event },
             &mut self.now,
+            &mut self.is_set_trail,
         );
 
         if is_redraw {
@@ -369,10 +371,18 @@ impl ApplicationHandler<Event> for Processor {
                         &mut self.scheduler,
                         event.clone(),
                         &mut self.now,
+                        &mut self.is_set_trail,
                     );
                 }
             },
             (EventType::Terminal(TerminalEvent::Wakeup), Some(window_id)) => {
+                if self.is_set_trail == false && self.now <= 1 {
+                    let timer_id = TimerId::new(Topic::CursorTrail, *window_id);
+                    let event = Event::new(EventType::CursorTrail, *window_id);
+                    let interval = Duration::from_millis(15);
+                    self.scheduler.schedule(event, interval, true, timer_id);
+                    self.is_set_trail = true
+                }
                 if let Some(window_context) = self.windows.get_mut(window_id) {
                     window_context.dirty = true;
                     if window_context.display.window.has_frame {
@@ -419,6 +429,7 @@ impl ApplicationHandler<Event> for Processor {
                         &mut self.scheduler,
                         WinitEvent::UserEvent(event),
                         &mut self.now,
+                        &mut self.is_set_trail,
                     );
                 }
             },
@@ -440,6 +451,7 @@ impl ApplicationHandler<Event> for Processor {
                 &mut self.scheduler,
                 WinitEvent::AboutToWait,
                 &mut self.now,
+                &mut self.is_set_trail,
             );
         }
 
@@ -645,11 +657,13 @@ pub struct ActionContext<'a, N, T> {
     #[cfg(not(windows))]
     pub shell_pid: u32,
     pub now: &'a mut u32,
+    pub is_set_trail: &'a mut bool,
 }
 
 impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionContext<'a, N, T> {
     #[inline]
     fn write_to_pty<B: Into<Cow<'static, [u8]>>>(&self, val: B) {
+        // println!("lmaodark");
         self.notifier.notify(val);
     }
 
@@ -1524,11 +1538,14 @@ impl<'a, N: Notify + 'a, T: EventListener> ActionContext<'a, N, T> {
         self.scheduler.schedule(event, blinking_interval, true, timer_id);
     }
     fn schedule_trail(&mut self, millis: u64) {
-        let window_id = self.display.window.id();
-        let timer_id = TimerId::new(Topic::CursorTrail, window_id);
-        let event = Event::new(EventType::CursorTrail, window_id);
-        let interval = Duration::from_millis(millis);
-        self.scheduler.schedule(event, interval, true, timer_id);
+        if *self.is_set_trail == false {
+            let window_id = self.display.window.id();
+            let timer_id = TimerId::new(Topic::CursorTrail, window_id);
+            let event = Event::new(EventType::CursorTrail, window_id);
+            let interval = Duration::from_millis(millis);
+            self.scheduler.schedule(event, interval, true, timer_id);
+            *self.is_set_trail = true
+        }
     }
     fn schedule_blinking_timeout(&mut self) {
         let blinking_timeout = self.config.cursor.blink_timeout();
@@ -1732,12 +1749,12 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-                    println!("lmaodark {}", self.ctx.now);
-                    if *self.ctx.now == 200 {
-                        println!("stop schedule");
+                    if *self.ctx.now >= 200 {
+                        // println!("stop schedule");
                         let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
                         self.ctx.scheduler.unschedule(timer_id);
                         *self.ctx.now = 0;
+                        *self.ctx.is_set_trail = false
                     }
                     *self.ctx.now += 1;
                 },
@@ -1805,7 +1822,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         let text = format(self.ctx.size_info().into());
                         self.ctx.write_to_pty(text.into_bytes());
                     },
-                    TerminalEvent::PtyWrite(text) => self.ctx.write_to_pty(text.into_bytes()),
+                    TerminalEvent::PtyWrite(text) => {
+                        self.ctx.write_to_pty(text.into_bytes())
+                    },
                     TerminalEvent::MouseCursorDirty => self.reset_mouse_cursor(),
                     TerminalEvent::CursorBlinkingChange => self.ctx.update_cursor_blinking(),
                     TerminalEvent::Exit | TerminalEvent::ChildExit(_) | TerminalEvent::Wakeup => (),
@@ -1844,9 +1863,6 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         self.ctx.display.pending_update.set_dimensions(size);
                     },
                     WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => {
-                        if *self.ctx.now == 0 {
-                            self.ctx.schedule_trail(15);
-                        }
                         self.key_input(event);
                     },
                     WindowEvent::ModifiersChanged(modifiers) => self.modifiers_input(modifiers),
@@ -1865,12 +1881,12 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     WindowEvent::Touch(touch) => self.touch(touch),
                     WindowEvent::Focused(is_focused) => {
                         self.ctx.terminal.is_focused = is_focused;
-                        if is_focused {
-                            self.ctx.schedule_trail(15);
-                        } else {
-                            let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
-                            self.ctx.scheduler.unschedule(timer_id);
-                        }
+                        // if is_focused {
+                        //     self.ctx.schedule_trail(15);
+                        // } else {
+                        //     let timer_id = TimerId::new(Topic::CursorTrail, self.ctx.display.window.id());
+                        //     self.ctx.scheduler.unschedule(timer_id);
+                        // }
 
                         // When the unfocused hollow is used we must redraw on focus change.
                         if self.ctx.config.cursor.unfocused_hollow {

@@ -430,6 +430,7 @@ impl Display {
             window.inner_size(),
             window.raw_window_handle(),
         )?;
+        // println!("lmaodark");
 
         // Make the context current.
         let context = gl_context.make_current(&surface)?;
