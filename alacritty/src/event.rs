@@ -1541,14 +1541,12 @@ impl<'a, N: Notify + 'a, T: EventListener> ActionContext<'a, N, T> {
         self.scheduler.schedule(event, blinking_interval, true, timer_id);
     }
     fn schedule_trail(&mut self, millis: u64) {
-        if *self.is_set_trail == false {
-            let window_id = self.display.window.id();
-            let timer_id = TimerId::new(Topic::CursorTrail, window_id);
-            let event = Event::new(EventType::CursorTrail, window_id);
-            let interval = Duration::from_millis(millis);
-            self.scheduler.schedule(event, interval, true, timer_id);
-            *self.is_set_trail = true
-        }
+        let window_id = self.display.window.id();
+        let timer_id = TimerId::new(Topic::CursorTrail, window_id);
+        let event = Event::new(EventType::CursorTrail, window_id);
+        let interval = Duration::from_millis(millis);
+        self.scheduler.schedule(event, interval, true, timer_id);
+        *self.is_set_trail = true
     }
     fn schedule_blinking_timeout(&mut self) {
         let blinking_timeout = self.config.cursor.blink_timeout();
@@ -1752,7 +1750,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-                    // println!("now  {}",*self.ctx.now);
+                    println!("now  {}",*self.ctx.now);
                     *self.ctx.is_set_trail = true;
                     if *self.ctx.now >= 200 {
                         println!("stop schedule");
