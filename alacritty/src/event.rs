@@ -1750,7 +1750,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-                    println!("now  {}",*self.ctx.now);
+                    // println!("now  {}",*self.ctx.now);
                     *self.ctx.is_set_trail = true;
                     if *self.ctx.now >= 200 {
                         println!("stop schedule");
