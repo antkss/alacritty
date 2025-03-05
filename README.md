@@ -10,7 +10,7 @@ This fork introduces basic cursor animations to Alacritty in a rather simple way
 It replaces the block cursor render by a rectangle with a changed blend mode and
 triggers a surface re-render every frame when the window is visible.
 
-Available in AUR: https://aur.archlinux.org/packages/alacritty-smooth-cursor-git
+fix cursor on wayland
 
 <p align="center">
     <img width="100%" alt="Alacritty smooth cursor demo" src="https://raw.githubusercontent.com/gregthemadmonk/alacritty/smooth-cursor/extra/demo.gif">
