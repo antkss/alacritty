@@ -683,6 +683,14 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
 
     fn scroll(&mut self, scroll: Scroll) {
         let old_offset = self.terminal.grid().display_offset() as i32;
+        let timer_id = TimerId::new(Topic::CursorTrail, self.display.window.id());
+        // println!("lmaodark ");
+        if *self.now <= 1 && *self.is_set_trail == false  && self.scheduler.check_exist(timer_id) == false {
+            let event = Event::new(EventType::CursorTrail, self.display.window.id());
+            let interval = Duration::from_millis(15);
+            self.scheduler.schedule(event, interval, true, timer_id);
+        }
+        *self.now = 0;
 
         let old_vi_cursor = self.terminal.vi_mode_cursor;
         self.terminal.scroll_display(scroll);
@@ -1132,7 +1140,20 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
     #[inline]
     fn on_typing_start(&mut self) {
         // Disable cursor blinking.
-        let timer_id = TimerId::new(Topic::BlinkCursor, self.display.window.id());
+        // println!("lmaodark");
+        let window_id = self.display.window.id();
+        let is_vi_mode = self.terminal.mode().contains(TermMode::VI);
+        let timer_id_trail = TimerId::new(Topic::CursorTrail, window_id);
+        let is_exist: bool = self.scheduler.check_exist(timer_id_trail);
+        // only in vi mode because of avoiding race condition
+        if is_vi_mode {
+            if *self.now <= 1 && *self.is_set_trail == false && is_exist == false {
+                let event = Event::new(EventType::CursorTrail, window_id);
+                let interval = Duration::from_millis(15);
+                self.scheduler.schedule(event, interval, true, timer_id_trail);
+            }
+        }
+        let timer_id = TimerId::new(Topic::BlinkCursor, window_id);
         if self.scheduler.unschedule(timer_id).is_some() {
             self.schedule_blinking();
 
@@ -1192,6 +1213,7 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
             },
             // Move the vi mode cursor.
             HintAction::Action(HintInternalAction::MoveViModeCursor) => {
+                // println!("lmaodark");
                 // Enter vi mode if we're not in it already.
                 if !self.terminal.mode().contains(TermMode::VI) {
                     self.terminal.toggle_vi_mode();
@@ -1750,7 +1772,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     }
                 },
                 EventType::CursorTrail => {
-                    // println!("now  {}",*self.ctx.now);
+                    // println!("lmaodark now  {}",*self.ctx.now);
                     *self.ctx.is_set_trail = true;
                     if *self.ctx.now >= 200 {
                         println!("stop schedule");
