@@ -26,13 +26,15 @@ Precompiled binaries are available from the [GitHub releases page](https://githu
 Join [`#alacritty`] on libera.chat if you have questions or looking for a quick help.
 
 [`#alacritty`]: https://web.libera.chat/gamja/?channels=#alacritty
-Note: this is not the official repo, this just a fork 
-config: 
+Note: this is not the official repo, this just a fork
+config:
 ```
 [general]
 live_config_reload =false
 import = ["~/.config/alacritty/color.toml"]
 shaders = ["/home/as/cursorv.glsl", "/home/as/cursor1.glsl"]
+[window]
+fps = 30
 ```
 ## Features
 
