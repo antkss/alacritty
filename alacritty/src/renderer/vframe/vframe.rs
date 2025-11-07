@@ -1,5 +1,5 @@
-use std::any::Any;
 use std::fs::read_to_string;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::gl::types::GLint;
@@ -91,47 +91,54 @@ impl MyFramebuffer {
         // vao: GLuint,
         // vbo: GLuint,
     ) -> Result<Self, String> {
-        let mut loc : GLint = -1;
-        let mut current_loc: GLint = -1;
-        let mut resolution_loc: GLint = -1;
-        let mut previous_loc: GLint  = -1;
-        let mut color_loc: GLint  = -1;
-        let mut prev_color_loc: GLint = -1;
-        let mut time_loc: GLint = -1;
-        let mut change_loc: GLint = -1;
-        let mut fragment_src = String::new();
-        if let Ok(fsrc) = read_to_string(config.general.shader.clone()) {
-            fragment_src = fsrc;
-        }
-        let program = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), fragment_src);
-        let program_default = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), DEFAULT_FRAGMENT.to_string());
         let mut program_use_id: GLuint = 0;
         let mut is_cprogram_loaded: bool = false;
-        unsafe {
-            match program {
-                Ok(pro) => {
-
-                    program_use_id = pro.id();
-                    is_cprogram_loaded = true;
-                },
-                Err(ref e) => {
-                    if let Ok(pd) =  program_default {
-                        program_use_id = pd.id();
+        let program_default = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), DEFAULT_FRAGMENT.to_string());
+        let mut fragment_path: PathBuf = PathBuf::from(config.general.shader.clone());
+        if fragment_path.is_relative() {
+            for file in &config.config_paths {
+                if let Some(config_path) = file.parent() {
+                    let fpath = config_path;
+                    let full_fpath = fpath.join(&fragment_path);
+                    if full_fpath.exists() {
+                        fragment_path = full_fpath;
+                        break;
                     }
-                    println!("ShaderErr: {}", e);
                 }
             }
-            loc = gl::GetUniformLocation(program_use_id, "iChannel0\0".as_ptr() as *const i8);
-            current_loc = gl::GetUniformLocation(program_use_id, "iCurrentCursor\0".as_ptr() as *const i8);
-            resolution_loc = gl::GetUniformLocation(program_use_id, "iResolution\0".as_ptr() as *const i8);
-            previous_loc = gl::GetUniformLocation(program_use_id, "iPreviousCursor\0".as_ptr() as *const i8);
-            color_loc = gl::GetUniformLocation(program_use_id, "iCurrentCursorColor\0".as_ptr() as *const i8);
-            prev_color_loc = gl::GetUniformLocation(program_use_id, "iPreviousCursorColor\0".as_ptr() as *const i8);
-            time_loc = gl::GetUniformLocation(program_use_id, "iTime\0".as_ptr() as *const i8);
-            change_loc = gl::GetUniformLocation(program_use_id, "iTimeCursorChange\0".as_ptr() as *const i8);
-
         }
+        match read_to_string(&fragment_path) {
+            Ok(fsrc) =>  {
+                let program = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), fsrc);
+                match program {
+                    Ok(pro) => {
 
+                        program_use_id = pro.id();
+                        is_cprogram_loaded = true;
+                    },
+                    Err(ref e) => {
+                        if let Ok(pd) =  program_default {
+                            program_use_id = pd.id();
+                        }
+                        println!("ShaderErr: {}", e);
+                    }
+                }
+            },
+            Err(e) => {
+                println!("read_to_string {}: {}",fragment_path.display(), e);
+                if let Ok(pd) =  program_default {
+                    program_use_id = pd.id();
+                }
+            }
+        }
+        let loc = unsafe { gl::GetUniformLocation(program_use_id, "iChannel0\0".as_ptr() as *const i8) };
+        let current_loc = unsafe { gl::GetUniformLocation(program_use_id, "iCurrentCursor\0".as_ptr() as *const i8) };
+        let resolution_loc = unsafe { gl::GetUniformLocation(program_use_id, "iResolution\0".as_ptr() as *const i8) };
+        let previous_loc = unsafe { gl::GetUniformLocation(program_use_id, "iPreviousCursor\0".as_ptr() as *const i8) };
+        let color_loc = unsafe { gl::GetUniformLocation(program_use_id, "iCurrentCursorColor\0".as_ptr() as *const i8) };
+        let prev_color_loc = unsafe { gl::GetUniformLocation(program_use_id, "iPreviousCursorColor\0".as_ptr() as *const i8) };
+        let time_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTime\0".as_ptr() as *const i8) };
+        let change_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTimeCursorChange\0".as_ptr() as *const i8) };
         let (fbo_id, texture_id, rbo_id) = Self::setup_vframe(width, height);
         Ok(MyFramebuffer {
             fbo_id: fbo_id,
@@ -225,51 +232,51 @@ impl MyFramebuffer {
     }
 
     pub fn update_render_data(&mut self, size_info: &SizeInfo, cursor_pos_x: f32, cursor_pos_y: f32, vao: GLuint) {
-            let frame_start_time = Instant::now();
-            // --- Cursor Rendering ---
-            let cellw = size_info.cell_width();
-            let cellh = size_info.cell_height();
-            if cursor_pos_x != self.x_pre || cursor_pos_y != self.y_pre {
-                self.last_cursor_change = self.start_time.elapsed().as_secs_f32();
-            }
-            // println!("prepos: {}x{} | pos {}x{}", self.x_pre, self.y_pre, cursor_pos_x, cursor_pos_y);
-            // println!("time {}", Instant::now().elapsed().as_secs_f32());
+        let frame_start_time = Instant::now();
+        // --- Cursor Rendering ---
+        let cellw = size_info.cell_width();
+        let cellh = size_info.cell_height();
+        if cursor_pos_x != self.x_pre || cursor_pos_y != self.y_pre {
+            self.last_cursor_change = self.start_time.elapsed().as_secs_f32();
+        }
+        // println!("prepos: {}x{} | pos {}x{}", self.x_pre, self.y_pre, cursor_pos_x, cursor_pos_y);
+        // println!("time {}", Instant::now().elapsed().as_secs_f32());
 
-            unsafe {
-                    gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-                    gl::Disable(gl::BLEND);
-                    gl::Viewport(0, 0, size_info.width() as i32, size_info.height() as i32);
-                    gl::ClearColor(0.0, 0.0, 0.0, 0.0);
-                    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-                    gl::BindVertexArray(vao);
-                    gl::UseProgram(self.program);
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            gl::Disable(gl::BLEND);
+            gl::Viewport(0, 0, size_info.width() as i32, size_info.height() as i32);
+            gl::ClearColor(0.0, 0.0, 0.0, 0.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+            gl::BindVertexArray(vao);
+            gl::UseProgram(self.program);
 ///////////////////////////////// start send uniform
-                    gl::Uniform4f(self.current_loc, cursor_pos_x, cursor_pos_y, cellw, cellh);
-                    gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);
-                    gl::Uniform4f(self.previous_loc, self.x_pre - size_info.cell_width(), self.y_pre, cellw, cellh);
-                    gl::Uniform4f(self.color_loc, 0.65, 0.6, 0.7, 1.0);
-                    gl::Uniform4f(self.prev_color_loc, 0.65, 0.6, 0.7, 1.0);
-                    gl::Uniform1f(self.time_loc, self.start_time.elapsed().as_secs_f32());
-                    gl::Uniform1f(self.change_loc, self.last_cursor_change);
+            gl::Uniform4f(self.current_loc, cursor_pos_x, cursor_pos_y, cellw, cellh);
+            gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);
+            gl::Uniform4f(self.previous_loc, self.x_pre - size_info.cell_width(), self.y_pre, cellw, cellh);
+            gl::Uniform4f(self.color_loc, 0.65, 0.6, 0.7, 1.0);
+            gl::Uniform4f(self.prev_color_loc, 0.65, 0.6, 0.7, 1.0);
+            gl::Uniform1f(self.time_loc, self.start_time.elapsed().as_secs_f32());
+            gl::Uniform1f(self.change_loc, self.last_cursor_change);
 ///////////////////////////////// end send uniform
-                    gl::ActiveTexture(gl::TEXTURE0);
-                    gl::BindTexture(gl::TEXTURE_2D, self.texture_id);
-                    gl::Uniform1i(self.loc, 0); // Tell iChannel0 to read from slot 0
-                    // 7. Draw the full-screen quad!
-                    gl::DrawArrays(gl::TRIANGLES, 0, 6);
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, self.texture_id);
+            gl::Uniform1i(self.loc, 0); // Tell iChannel0 to read from slot 0
+            // 7. Draw the full-screen quad!
+            gl::DrawArrays(gl::TRIANGLES, 0, 6);
 
-            }
-            // Update previous centered values
-            self.x_pre = cursor_pos_x;
-            self.y_pre = cursor_pos_y;
-            // limit fps
-            let elapsed_time = frame_start_time.elapsed();
-            let target_frame_duration: Duration = Duration::from_millis(1000 / self.config.window.fps as u64);
-            if elapsed_time < target_frame_duration {
-                // We finished the frame early, so sleep for the remaining time
-                let sleep_duration = target_frame_duration - elapsed_time;
-                std::thread::sleep(sleep_duration);
-            }
+        }
+        // Update previous centered values
+        self.x_pre = cursor_pos_x;
+        self.y_pre = cursor_pos_y;
+        // limit fps
+        let elapsed_time = frame_start_time.elapsed();
+        let target_frame_duration: Duration = Duration::from_millis(1000 / self.config.window.fps as u64);
+        if elapsed_time < target_frame_duration {
+            // We finished the frame early, so sleep for the remaining time
+            let sleep_duration = target_frame_duration - elapsed_time;
+            std::thread::sleep(sleep_duration);
+        }
     }
     pub fn setup_full_screen_quad() -> (GLuint,GLuint) {
         let (mut vao, mut vbo) = (0, 0);
@@ -374,13 +381,6 @@ impl MyFramebuffer {
                 alpha,
             );
             gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
-    }
-    pub fn delete_render(&mut self) {
-        unsafe {
-            gl::DeleteFramebuffers(1, &self.fbo_id);
-            gl::DeleteTextures(1, &self.texture_id);
-            gl::DeleteRenderbuffers(1, &self.rbo_id);
         }
     }
 }
