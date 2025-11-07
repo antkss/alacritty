@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::fs::read_to_string;
 use std::time::{Duration, Instant};
 
@@ -16,7 +17,7 @@ pub struct MyFramebuffer {
     x_pre: f32,
     y_pre: f32,
     last_cursor_change: f32,
-    program: Result<ShaderRawPro, String>,
+    program: GLuint,
     config: UiConfig,
     start_time: Instant,
 
@@ -77,6 +78,8 @@ fn update_projection(u_projection: GLint, size: &SizeInfo) {
         gl::Uniform4f(u_projection, offset_x, offset_y, scale_x, scale_y);
     }
 }
+const DEFAULT_VERTEX: &str = include_str!("c.v.glsl");
+const DEFAULT_FRAGMENT: &str = include_str!("c.f.glsl");
 /// Creates a new Framebuffer Object (FBO) with a texture to draw into.
 ///
 /// `width` and `height` should be the size of your window.
@@ -96,41 +99,62 @@ impl MyFramebuffer {
         let mut prev_color_loc: GLint = -1;
         let mut time_loc: GLint = -1;
         let mut change_loc: GLint = -1;
-        let shaders = &config.general.shaders;
-        let (mut vertex_src, mut fragment_src) = (String::new(), String::new());
-        if shaders.len() == 2 {
-            let vpath = shaders[0].clone();
-            let fpath = shaders[1].clone();
-            if let (Ok(vsrc), Ok(fsrc)) = (read_to_string(vpath), read_to_string(fpath)) {
-                vertex_src = vsrc;
-                fragment_src = fsrc;
-            }
+        let mut fragment_src = String::new();
+        if let Ok(fsrc) = read_to_string(config.general.shader.clone()) {
+            fragment_src = fsrc;
         }
-        let program = ShaderRawPro::new(vertex_src, fragment_src);
+        let program = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), fragment_src);
+        let program_default = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), DEFAULT_FRAGMENT.to_string());
+        let mut program_use_id: GLuint = 0;
         let mut is_cprogram_loaded: bool = false;
         unsafe {
             match program {
                 Ok(pro) => {
-                    loc = gl::GetUniformLocation(pro.id(), "iChannel0\0".as_ptr() as *const i8);
-                    current_loc = gl::GetUniformLocation(pro.id(), "iCurrentCursor\0".as_ptr() as *const i8);
-                    resolution_loc = gl::GetUniformLocation(pro.id(), "iResolution\0".as_ptr() as *const i8);
-                    previous_loc = gl::GetUniformLocation(pro.id(), "iPreviousCursor\0".as_ptr() as *const i8);
-                    color_loc = gl::GetUniformLocation(pro.id(), "iCurrentCursorColor\0".as_ptr() as *const i8);
-                    prev_color_loc = gl::GetUniformLocation(pro.id(), "iPreviousCursorColor\0".as_ptr() as *const i8);
-                    time_loc = gl::GetUniformLocation(pro.id(), "iTime\0".as_ptr() as *const i8);
-                    change_loc = gl::GetUniformLocation(pro.id(), "iTimeCursorChange\0".as_ptr() as *const i8);
+
+                    program_use_id = pro.id();
                     is_cprogram_loaded = true;
                 },
                 Err(ref e) => {
-                    println!("ShaderError: {}", e);
+                    if let Ok(pd) =  program_default {
+                        program_use_id = pd.id();
+                    }
+                    println!("ShaderErr: {}", e);
                 }
             }
-
+            loc = gl::GetUniformLocation(program_use_id, "iChannel0\0".as_ptr() as *const i8);
+            current_loc = gl::GetUniformLocation(program_use_id, "iCurrentCursor\0".as_ptr() as *const i8);
+            resolution_loc = gl::GetUniformLocation(program_use_id, "iResolution\0".as_ptr() as *const i8);
+            previous_loc = gl::GetUniformLocation(program_use_id, "iPreviousCursor\0".as_ptr() as *const i8);
+            color_loc = gl::GetUniformLocation(program_use_id, "iCurrentCursorColor\0".as_ptr() as *const i8);
+            prev_color_loc = gl::GetUniformLocation(program_use_id, "iPreviousCursorColor\0".as_ptr() as *const i8);
+            time_loc = gl::GetUniformLocation(program_use_id, "iTime\0".as_ptr() as *const i8);
+            change_loc = gl::GetUniformLocation(program_use_id, "iTimeCursorChange\0".as_ptr() as *const i8);
 
         }
 
         let (fbo_id, texture_id, rbo_id) = Self::setup_vframe(width, height);
-        Ok(MyFramebuffer { fbo_id: fbo_id, texture_id: texture_id, rbo_id: rbo_id , width: width, height: height, last_cursor_change: 0.0, program: program, x_pre: 0.0, y_pre: 0.0, config: config, start_time: Instant::now(), loc: loc, current_loc: current_loc, resolution_loc:resolution_loc, previous_loc: previous_loc, color_loc: color_loc, prev_color_loc: prev_color_loc, time_loc: time_loc, change_loc: change_loc, is_cprogram_loaded: is_cprogram_loaded })
+        Ok(MyFramebuffer {
+            fbo_id: fbo_id,
+            texture_id: texture_id,
+            rbo_id: rbo_id ,
+            width: width,
+            height: height,
+            last_cursor_change: 0.0,
+            program: program_use_id,
+            x_pre: 0.0, y_pre: 0.0,
+            config: config,
+            start_time: Instant::now(),
+            loc: loc,
+            current_loc: current_loc,
+            resolution_loc:resolution_loc,
+            previous_loc: previous_loc,
+            color_loc: color_loc,
+            prev_color_loc:
+            prev_color_loc,
+            time_loc: time_loc,
+            change_loc: change_loc,
+            is_cprogram_loaded: is_cprogram_loaded
+        })
     }
     pub fn setup_vframe(width: i32, height: i32) -> (GLuint, GLuint, GLuint) {
         let (mut fbo_id, mut texture_id, mut rbo_id) = (0, 0, 0);
@@ -218,9 +242,7 @@ impl MyFramebuffer {
                     gl::ClearColor(0.0, 0.0, 0.0, 0.0);
                     gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                     gl::BindVertexArray(vao);
-                    if let Ok(pro) = &self.program {
-                        gl::UseProgram(pro.id());
-                    }
+                    gl::UseProgram(self.program);
 ///////////////////////////////// start send uniform
                     gl::Uniform4f(self.current_loc, cursor_pos_x, cursor_pos_y, cellw, cellh);
                     gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);

@@ -27,7 +27,7 @@ pub struct General {
     /// Offer IPC through a unix socket.
     #[allow(unused)]
     pub ipc_socket: bool,
-    pub shaders: Vec<String>,
+    pub shader: String,
 }
 
 impl Default for General {
@@ -37,7 +37,7 @@ impl Default for General {
             ipc_socket: true,
             working_directory: Default::default(),
             import: Default::default(),
-            shaders: Default::default()
+            shader: "".to_string(),
         }
     }
 }
