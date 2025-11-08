@@ -32,7 +32,7 @@ config:
 [general]
 live_config_reload =false
 import = ["~/.config/alacritty/color.toml"]
-shaders = ["/home/as/cursorv.glsl", "/home/as/cursor1.glsl"]
+shaders = "/home/as/cursorf.glsl"
 [window]
 fps = 30
 ```
