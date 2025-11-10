@@ -337,9 +337,9 @@ impl Renderer {
     }
 
     pub fn finish(&self) {
-        unsafe {
-            gl::Finish();
-        }
+        // unsafe {
+            // gl::Finish();
+        // }
     }
 
     /// Set the viewport for cell rendering.
