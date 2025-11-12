@@ -3,7 +3,7 @@
 # Contributor: ThatOneCalculator <kainoa at t1c dot dev>
 
 pkgname=alany
-pkgver=2
+pkgver=3
 pkgrel=1
 pkgdesc="nothing there"
 arch=(x86_64)
