@@ -62,10 +62,13 @@ pub mod content;
 pub mod cursor;
 pub mod hint;
 pub mod window;
+pub mod scrollbar;
 
 mod bell;
 mod damage;
 mod meter;
+use scrollbar::Scrollbar;
+use crate::config::ui_config::{Scrollbar as ScrollbarConfig, ScrollbarMode};
 
 /// Label for the forward terminal search bar.
 const FORWARD_SEARCH_LABEL: &str = "Search: ";
@@ -398,7 +401,8 @@ pub struct Display {
     glyph_cache: GlyphCache,
     meter: Meter,
     config: UiConfig,
-    pub is_frame_loop: bool
+    pub is_frame_loop: bool,
+    pub scrollbar: Scrollbar,
 }
 
 impl Display {
@@ -450,7 +454,7 @@ impl Display {
         let viewport_size = window.inner_size();
 
         // Create new size with at least one column and row.
-        let size_info = SizeInfo::new(
+        let mut size_info = SizeInfo::new(
             viewport_size.width as f32,
             viewport_size.height as f32,
             cell_width,
@@ -545,6 +549,7 @@ impl Display {
             ime: Default::default(),
             config: config.clone(),
             is_frame_loop: false,
+            scrollbar: Scrollbar::from(&config.scrollbar),
         })
     }
 
@@ -704,6 +709,9 @@ impl Display {
             padding.1,
             config.window.dynamic_padding,
         );
+        if config.scrollbar.mode == ScrollbarMode::Always && new_size.columns > 1 {
+            new_size.columns -= 1;
+        }
 
         // Update number of column/lines in the viewport.
         let search_active = search_state.history_index.is_some();
@@ -967,6 +975,15 @@ impl Display {
                 self.draw_ime_preview(point, fg, bg, &mut rects, config);
             }
         }
+        if config.scrollbar.mode != ScrollbarMode::Never {
+            self.draw_scrollbar(
+                &mut rects,
+                scheduler,
+                display_offset,
+                total_lines,
+                &config.scrollbar,
+            );
+        }
 
         if let Some(message) = message_buffer.message() {
             let search_offset = usize::from(search_state.regex().is_some());
@@ -1066,6 +1083,7 @@ impl Display {
         self.damage_tracker.debug = config.debug.highlight_damage;
         self.visual_bell.update_config(&config.bell);
         self.colors = List::from(&config.colors);
+        self.scrollbar.update_config(&config.scrollbar);
     }
 
     /// Update the mouse/vi mode cursor hint highlighting.
@@ -1138,6 +1156,66 @@ impl Display {
         }
 
         dirty
+    }
+    fn request_scrollbar_redraw(&mut self, scheduler: &mut Scheduler, wait_timeout: Duration) {
+        let window_id = self.window.id();
+        let timer_id = TimerId::new(Topic::ScrollbarRedraw, window_id);
+        let event = Event::new(EventType::Frame, window_id);
+
+        scheduler.unschedule(timer_id);
+        scheduler.schedule(event, wait_timeout, false, timer_id);
+    }
+    fn draw_scrollbar(
+        &mut self,
+        rects: &mut Vec<RenderRect>,
+        scheduler: &mut Scheduler,
+        display_offset: usize,
+        total_lines: usize,
+        config: &ScrollbarConfig,
+    ) {
+        let did_position_change = self.scrollbar.update(display_offset, total_lines);
+        let opacity = match self.scrollbar.intensity(self.size_info) {
+            scrollbar::ScrollbarState::Show { opacity } => opacity,
+            scrollbar::ScrollbarState::WaitForFading { opacity, remaining_duration } => {
+                self.request_scrollbar_redraw(scheduler, remaining_duration);
+                opacity
+            },
+            scrollbar::ScrollbarState::Fading { opacity } => {
+                self.window.request_redraw();
+                opacity
+            },
+            scrollbar::ScrollbarState::Invisible { has_damage } => {
+                if !has_damage {
+                    return;
+                }
+                0.
+            },
+        };
+        let bg_rect = self.scrollbar.bg_rect(self.size_info);
+        let scrollbar_rect = self.scrollbar.rect_from_bg_rect(bg_rect, self.size_info);
+        let y = self.size_info.height - (scrollbar_rect.y + scrollbar_rect.height) as f32;
+        if opacity != 0. {
+            rects.push(RenderRect::new(
+                scrollbar_rect.x as f32,
+                y,
+                scrollbar_rect.width as f32,
+                scrollbar_rect.height as f32,
+                config.color,
+                opacity,
+            ));
+        }
+
+        if did_position_change
+            || (config.mode == ScrollbarMode::Fading && opacity < config.opacity.as_f32())
+        {
+            self.damage_tracker.frame().add_viewport_rect(
+                &self.size_info,
+                scrollbar_rect.x,
+                y as i32,
+                scrollbar_rect.width,
+                scrollbar_rect.height,
+            );
+        }
     }
 
     #[inline(never)]
