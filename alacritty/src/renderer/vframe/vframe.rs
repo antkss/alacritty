@@ -1,12 +1,11 @@
 use std::fs::read_to_string;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 use crate::gl::types::GLint;
-use std::{mem};
 use crate::config::UiConfig;
 use crate::renderer::vframe::ShaderRawPro;
-use crate::{display::SizeInfo, gl::{self, types::{GLfloat, GLsizei, GLsizeiptr, GLuint, GLvoid}}};
+use crate::{display::SizeInfo, gl::{self, types::{ GLuint }}};
 #[derive(Debug, Clone)]
 pub struct MyFramebuffer {
     pub fbo_id: gl::types::GLuint,     // The FBO itself
@@ -14,13 +13,8 @@ pub struct MyFramebuffer {
     pub rbo_id: gl::types::GLuint,     // The depth/stencil buffer
     pub width: i32,
     pub height: i32,
-    x_pre: f32,
-    y_pre: f32,
-    last_cursor_change: f32,
     program: GLuint,
-    config: UiConfig,
     start_time: Instant,
-
     loc : GLint,
     current_loc: GLint,
     resolution_loc: GLint,
@@ -30,9 +24,20 @@ pub struct MyFramebuffer {
     time_loc: GLint,
     change_loc: GLint,
     pub is_cprogram_loaded: bool,
+    last_frame_time: f32,
+    last_cursor_change: f32,
+    from_x: f32,
+    from_y: f32,
+    target_x: f32,
+    target_y: f32,
+    render_x: f32,
+    render_y: f32,
+    vel_x: f32,
+    vel_y: f32,
 
 
 }
+
 impl Drop for MyFramebuffer {
     fn drop(&mut self) {
         // This code automatically runs when the struct is dropped,
@@ -45,39 +50,40 @@ impl Drop for MyFramebuffer {
     }
 }
 // ➡️ This array defines two triangles that form a quad covering the entire [-1.0, 1.0] NDC space.
-const FULL_SCREEN_VERTICES: [f32; 24] = [
-    // Position (X, Y),   TexCoords (U, V)
-    -1.0,  1.0,  0.0, 1.0, // Top-Left (V1)
-    -1.0, -1.0,  0.0, 0.0, // Bottom-Left (V2)
-     1.0, -1.0,  1.0, 0.0, // Bottom-Right (V3)
-
-    -1.0,  1.0,  0.0, 1.0, // Top-Left (V1) - Reused
-     1.0, -1.0,  1.0, 0.0, // Bottom-Right (V3) - Reused
-     1.0,  1.0,  1.0, 1.0, // Top-Right (V4)
-];
-fn update_projection(u_projection: GLint, size: &SizeInfo) {
-    let width = size.width();
-    let height = size.height();
-    let padding_x = size.padding_x();
-    let padding_y = size.padding_y();
-
-    // Bounds check.
-    if (width as u32) < (2 * padding_x as u32) || (height as u32) < (2 * padding_y as u32) {
-        return;
-    }
-
-    // Compute scale and offset factors, from pixel to ndc space. Y is inverted.
-    //   [0, width - 2 * padding_x] to [-1, 1]
-    //   [height - 2 * padding_y, 0] to [-1, 1]
-    let scale_x = 2. / (width - 2. * padding_x);
-    let scale_y = -2. / (height - 2. * padding_y);
-    let offset_x = -1.;
-    let offset_y = 1.;
-
-    unsafe {
-        gl::Uniform4f(u_projection, offset_x, offset_y, scale_x, scale_y);
-    }
-}
+// const FULL_SCREEN_VERTICES: [f32; 24] = [
+//     // Position (X, Y),   TexCoords (U, V)
+//     -1.0,  1.0,  0.0, 1.0, // Top-Left (V1)
+//     -1.0, -1.0,  0.0, 0.0, // Bottom-Left (V2)
+//      1.0, -1.0,  1.0, 0.0, // Bottom-Right (V3)
+//
+//     -1.0,  1.0,  0.0, 1.0, // Top-Left (V1) - Reused
+//      1.0, -1.0,  1.0, 0.0, // Bottom-Right (V3) - Reused
+//      1.0,  1.0,  1.0, 1.0, // Top-Right (V4)
+// ];
+// fn update_projection(u_projection: GLint, size: &SizeInfo) {
+//     let width = size.width();
+//     let height = size.height();
+//     let padding_x = size.padding_x();
+//     let padding_y = size.padding_y();
+//
+//     // Bounds check.
+//     if (width as u32) < (2 * padding_x as u32) || (height as u32) < (2 * padding_y as u32) {
+//         return;
+//     }
+//
+//     // Compute scale and offset factors, from pixel to ndc space. Y is inverted.
+//     //   [0, width - 2 * padding_x] to [-1, 1]
+//     //   [height - 2 * padding_y, 0] to [-1, 1]
+//     let scale_x = 2. / (width - 2. * padding_x);
+//     let scale_y = -2. / (height - 2. * padding_y);
+//     let offset_x = -1.;
+//     let offset_y = 1.;
+//
+//     unsafe {
+//         gl::Uniform4f(u_projection, offset_x, offset_y, scale_x, scale_y);
+//     }
+// }
+//
 const DEFAULT_VERTEX: &str = include_str!("c.v.glsl");
 const DEFAULT_FRAGMENT: &str = include_str!("c.f.glsl");
 /// Creates a new Framebuffer Object (FBO) with a texture to draw into.
@@ -148,8 +154,6 @@ impl MyFramebuffer {
             height: height,
             last_cursor_change: 0.0,
             program: program_use_id,
-            x_pre: 0.0, y_pre: 0.0,
-            config: config,
             start_time: Instant::now(),
             loc: loc,
             current_loc: current_loc,
@@ -160,9 +164,19 @@ impl MyFramebuffer {
             prev_color_loc,
             time_loc: time_loc,
             change_loc: change_loc,
-            is_cprogram_loaded: is_cprogram_loaded
+            is_cprogram_loaded: is_cprogram_loaded,
+            from_x: 0.0,
+            from_y: 0.0,
+            render_x: 0.0,
+            render_y: 0.0,
+            target_x: 0.0,
+            target_y: 0.0,
+            last_frame_time: 0.0,
+            vel_x: 0.0,
+            vel_y: 0.0,
         })
     }
+
     pub fn setup_vframe(width: i32, height: i32) -> (GLuint, GLuint, GLuint) {
         let (mut fbo_id, mut texture_id, mut rbo_id) = (0, 0, 0);
 
@@ -230,17 +244,66 @@ impl MyFramebuffer {
         }
         (fbo_id, texture_id, rbo_id)
     }
+    fn update_cursor(&mut self, dt: f32) {
+        let stiffness = 320.0;
+        let damping = 26.0;
 
-    pub fn update_render_data(&mut self, size_info: &SizeInfo, cursor_pos_x: f32, cursor_pos_y: f32, vao: GLuint) {
-        let frame_start_time = Instant::now();
-        // --- Cursor Rendering ---
+        let ax = (self.target_x - self.render_x) * stiffness;
+        let ay = (self.target_y - self.render_y) * stiffness;
+
+        self.vel_x = (self.vel_x + ax * dt) * (-damping * dt).exp();
+        self.vel_y = (self.vel_y + ay * dt) * (-damping * dt).exp();
+
+        self.render_x += self.vel_x * dt;
+        self.render_y += self.vel_y * dt;
+
+        if (self.target_x - self.render_x).abs() < 0.01 && self.vel_x.abs() < 0.01 {
+            self.render_x = self.target_x;
+            self.vel_x = 0.0;
+        }
+
+        if (self.target_y - self.render_y).abs() < 0.01 && self.vel_y.abs() < 0.01 {
+            self.render_y = self.target_y;
+            self.vel_y = 0.0;
+        }
+    }
+
+    pub fn update_render_data(
+        &mut self,
+        size_info: &SizeInfo,
+        cursor_pos_x: f32,
+        cursor_pos_y: f32,
+        vao: GLuint,
+    ) {
+        let now = self.start_time.elapsed().as_secs_f32();
         let cellw = size_info.cell_width();
         let cellh = size_info.cell_height();
-        if cursor_pos_x != self.x_pre || cursor_pos_y != self.y_pre {
-            self.last_cursor_change = self.start_time.elapsed().as_secs_f32();
+
+        // first frame
+        if self.last_frame_time == 0.0 {
+            self.from_x = cursor_pos_x;
+            self.from_y = cursor_pos_y;
+            self.target_x = cursor_pos_x;
+            self.target_y = cursor_pos_y;
+            self.render_x = cursor_pos_x;
+            self.render_y = cursor_pos_y;
+            self.last_frame_time = now;
+            self.last_cursor_change = now;
         }
-        // println!("prepos: {}x{} | pos {}x{}", self.x_pre, self.y_pre, cursor_pos_x, cursor_pos_y);
-        // println!("time {}", Instant::now().elapsed().as_secs_f32());
+
+        // cursor moved -> set new target
+        if cursor_pos_x != self.target_x || cursor_pos_y != self.target_y {
+            self.from_x = self.render_x;
+            self.from_y = self.render_y;
+            self.target_x = cursor_pos_x;
+            self.target_y = cursor_pos_y;
+            self.last_cursor_change = now;
+        }
+
+        let dt = (now - self.last_frame_time).clamp(0.0, 1.0 / 30.0);
+        self.last_frame_time = now;
+
+        self.update_cursor(dt);
 
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
@@ -250,74 +313,24 @@ impl MyFramebuffer {
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
             gl::BindVertexArray(vao);
             gl::UseProgram(self.program);
-///////////////////////////////// start send uniform
-            gl::Uniform4f(self.current_loc, cursor_pos_x, cursor_pos_y, cellw, cellh);
+
             gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);
-            gl::Uniform4f(self.previous_loc, self.x_pre - size_info.cell_width(), self.y_pre, cellw, cellh);
+
+            gl::Uniform4f(self.previous_loc, self.from_x, self.from_y, cellw, cellh);
+            gl::Uniform4f(self.current_loc, self.render_x, self.render_y, cellw, cellh);
+
             gl::Uniform4f(self.color_loc, 0.65, 0.6, 0.7, 1.0);
             gl::Uniform4f(self.prev_color_loc, 0.65, 0.6, 0.7, 1.0);
-            gl::Uniform1f(self.time_loc, self.start_time.elapsed().as_secs_f32());
+            gl::Uniform1f(self.time_loc, now);
             gl::Uniform1f(self.change_loc, self.last_cursor_change);
-///////////////////////////////// end send uniform
+
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, self.texture_id);
-            gl::Uniform1i(self.loc, 0); // Tell iChannel0 to read from slot 0
-            // 7. Draw the full-screen quad!
+            gl::Uniform1i(self.loc, 0);
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
-
-        }
-        // Update previous centered values
-        self.x_pre = cursor_pos_x;
-        self.y_pre = cursor_pos_y;
-        // limit fps
-        let elapsed_time = frame_start_time.elapsed();
-        let target_frame_duration: Duration = Duration::from_millis(1000 / self.config.window.fps as u64);
-        if elapsed_time < target_frame_duration {
-            // We finished the frame early, so sleep for the remaining time
-            let sleep_duration = target_frame_duration - elapsed_time;
-            std::thread::sleep(sleep_duration);
         }
     }
-    pub fn setup_full_screen_quad() -> (GLuint,GLuint) {
-        let (mut vao, mut vbo) = (0, 0);
 
-        unsafe {
-            // 1. Generate and Bind VAO
-            gl::GenVertexArrays(1, &mut vao);
-            gl::GenBuffers(1, &mut vbo);
-            gl::BindVertexArray(vao);
-            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-
-            // 2. Upload Data to VBO
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (FULL_SCREEN_VERTICES.len() * mem::size_of::<GLfloat>()) as GLsizeiptr,
-                FULL_SCREEN_VERTICES.as_ptr() as *const GLvoid,
-                gl::STATIC_DRAW, // Data won't change often
-            );
-
-            let stride = (4 * mem::size_of::<GLfloat>()) as GLsizei; // 4 floats (2 position + 2 UV)
-
-            // 3. Configure Vertex Attribute Pointers (Layout must match the shader)
-
-            // ➡️ Position (Layout Location 0 in shader)
-            gl::VertexAttribPointer(
-                0, 2, gl::FLOAT, gl::FALSE, stride, std::ptr::null(), // Offset 0
-            );
-            gl::EnableVertexAttribArray(0);
-
-            // ➡️ TexCoords (Layout Location 1 in shader)
-            gl::VertexAttribPointer(
-                1, 2, gl::FLOAT, gl::FALSE, stride, (2 * mem::size_of::<GLfloat>()) as *const GLvoid, // Offset 8 bytes
-            );
-            gl::EnableVertexAttribArray(1);
-
-            // Cleanup
-            gl::BindVertexArray(0);
-            gl::BindBuffer(gl::ARRAY_BUFFER, 0);
-        }
-        (vao, vbo)
-    }
     pub fn resize_vframe(
         &mut self,
     new_width: i32,
@@ -370,17 +383,17 @@ impl MyFramebuffer {
     pub fn stop(&self) {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, 0) };
     }
-    pub fn clear(&self) {
-        let color = self.config.colors.primary.background;
-        let alpha = self.config.window_opacity();
-        unsafe {
-            gl::ClearColor(
-                (f32::from(color.r) / 255.0).min(1.0) * alpha,
-                (f32::from(color.g) / 255.0).min(1.0) * alpha,
-                (f32::from(color.b) / 255.0).min(1.0) * alpha,
-                alpha,
-            );
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
-    }
+    // pub fn clear(&self) {
+    //     let color = self.config.colors.primary.background;
+    //     let alpha = self.config.window_opacity();
+    //     unsafe {
+    //         gl::ClearColor(
+    //             (f32::from(color.r) / 255.0).min(1.0) * alpha,
+    //             (f32::from(color.g) / 255.0).min(1.0) * alpha,
+    //             (f32::from(color.b) / 255.0).min(1.0) * alpha,
+    //             alpha,
+    //         );
+    //         gl::Clear(gl::COLOR_BUFFER_BIT);
+    //     }
+    // }
 }
