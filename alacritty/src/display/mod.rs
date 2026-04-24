@@ -1072,7 +1072,11 @@ impl Display {
         }
 
         self.damage_tracker.swap_damage();
-        if self.is_frame_loop && self.renderer.vframe.is_cprogram_loaded {
+        self.is_frame_loop = self.config.general.animated;
+        if self.is_frame_loop == false {
+            self.is_frame_loop = !self.renderer.vframe.stop_animated;
+        }
+        if self.is_frame_loop {
             self.window.request_redraw();
             self.damage_tracker.frame().mark_fully_damaged();
         }

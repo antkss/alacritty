@@ -28,6 +28,8 @@ pub struct General {
     #[allow(unused)]
     pub ipc_socket: bool,
     pub shader: String,
+    pub animated: bool,
+    pub shader_duration: f32,
 }
 
 impl Default for General {
@@ -38,6 +40,8 @@ impl Default for General {
             working_directory: Default::default(),
             import: Default::default(),
             shader: "".to_string(),
+            animated: false,
+            shader_duration: 0.08,
         }
     }
 }

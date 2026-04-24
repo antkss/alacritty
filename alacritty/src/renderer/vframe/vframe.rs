@@ -23,9 +23,11 @@ pub struct MyFramebuffer {
     prev_color_loc: GLint,
     time_loc: GLint,
     change_loc: GLint,
+    duration_loc: GLint,
     pub is_cprogram_loaded: bool,
     last_frame_time: f32,
     last_cursor_change: f32,
+    pub stop_animated: bool,
     from_x: f32,
     from_y: f32,
     target_x: f32,
@@ -34,7 +36,7 @@ pub struct MyFramebuffer {
     render_y: f32,
     vel_x: f32,
     vel_y: f32,
-
+    config: UiConfig,
 
 }
 
@@ -145,6 +147,7 @@ impl MyFramebuffer {
         let prev_color_loc = unsafe { gl::GetUniformLocation(program_use_id, "iPreviousCursorColor\0".as_ptr() as *const i8) };
         let time_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTime\0".as_ptr() as *const i8) };
         let change_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTimeCursorChange\0".as_ptr() as *const i8) };
+        let duration_loc = unsafe { gl::GetUniformLocation(program_use_id, b"iDuration\0".as_ptr() as *const i8) };
         let (fbo_id, texture_id, rbo_id) = Self::setup_vframe(width, height);
         Ok(MyFramebuffer {
             fbo_id: fbo_id,
@@ -164,6 +167,7 @@ impl MyFramebuffer {
             prev_color_loc,
             time_loc: time_loc,
             change_loc: change_loc,
+            duration_loc: duration_loc,
             is_cprogram_loaded: is_cprogram_loaded,
             from_x: 0.0,
             from_y: 0.0,
@@ -174,6 +178,8 @@ impl MyFramebuffer {
             last_frame_time: 0.0,
             vel_x: 0.0,
             vel_y: 0.0,
+            config: config,
+            stop_animated: true,
         })
     }
 
@@ -245,7 +251,7 @@ impl MyFramebuffer {
         (fbo_id, texture_id, rbo_id)
     }
     fn update_cursor(&mut self, dt: f32) {
-        let stiffness = 320.0;
+        let stiffness = 420.0;
         let damping = 26.0;
 
         let ax = (self.target_x - self.render_x) * stiffness;
@@ -289,21 +295,37 @@ impl MyFramebuffer {
             self.render_y = cursor_pos_y;
             self.last_frame_time = now;
             self.last_cursor_change = now;
+            self.stop_animated = false;
         }
 
-        // cursor moved -> set new target
+        // cursor moved -> restart animation
         if cursor_pos_x != self.target_x || cursor_pos_y != self.target_y {
             self.from_x = self.render_x;
             self.from_y = self.render_y;
             self.target_x = cursor_pos_x;
             self.target_y = cursor_pos_y;
             self.last_cursor_change = now;
+            self.stop_animated = false;
         }
 
         let dt = (now - self.last_frame_time).clamp(0.0, 1.0 / 30.0);
         self.last_frame_time = now;
 
-        self.update_cursor(dt);
+        if !self.stop_animated {
+            self.update_cursor(dt);
+        }
+
+        if !self.config.general.animated
+            && !self.stop_animated
+            && (now - self.last_cursor_change) >= self.config.general.shader_duration
+        {
+            self.render_x = self.target_x;
+            self.render_y = self.target_y;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.stop_animated = true;
+            println!("timeout reached, stop animating !");
+        }
 
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
@@ -315,7 +337,6 @@ impl MyFramebuffer {
             gl::UseProgram(self.program);
 
             gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);
-
             gl::Uniform4f(self.previous_loc, self.from_x, self.from_y, cellw, cellh);
             gl::Uniform4f(self.current_loc, self.render_x, self.render_y, cellw, cellh);
 
@@ -323,6 +344,7 @@ impl MyFramebuffer {
             gl::Uniform4f(self.prev_color_loc, 0.65, 0.6, 0.7, 1.0);
             gl::Uniform1f(self.time_loc, now);
             gl::Uniform1f(self.change_loc, self.last_cursor_change);
+            gl::Uniform1f(self.duration_loc, self.config.general.shader_duration);
 
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, self.texture_id);
