@@ -1989,11 +1989,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         if is_focused {
                             // Reset the urgency hint when gaining focus.
                             self.ctx.window().set_urgent(false);
-                            self.ctx.display.is_frame_loop = true;
                         } else {
                             // Clear touch focus when window loses focus.
                             self.ctx.window().set_touch_focus(false);
-                            self.ctx.display.is_frame_loop = false;
                         }
 
                         self.ctx.update_cursor_blinking();

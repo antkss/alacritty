@@ -401,7 +401,6 @@ pub struct Display {
     glyph_cache: GlyphCache,
     meter: Meter,
     config: UiConfig,
-    pub is_frame_loop: bool,
     pub scrollbar: Scrollbar,
 }
 
@@ -520,7 +519,6 @@ impl Display {
         if let Err(err) = surface.set_swap_interval(&context, SwapInterval::DontWait) {
             info!("Failed to disable vsync: {err}");
         }
-        renderer.vframe.stop();
 
         Ok(Self {
             context: ManuallyDrop::new(context),
@@ -548,7 +546,6 @@ impl Display {
             meter: Default::default(),
             ime: Default::default(),
             config: config.clone(),
-            is_frame_loop: false,
             scrollbar: Scrollbar::from(&config.scrollbar),
         })
     }
@@ -1072,11 +1069,7 @@ impl Display {
         }
 
         self.damage_tracker.swap_damage();
-        self.is_frame_loop = self.config.general.animated;
-        if self.is_frame_loop == false {
-            self.is_frame_loop = !self.renderer.vframe.stop_animated;
-        }
-        if self.is_frame_loop {
+        if !self.renderer.vframe.stop_animated || self.config.general.animated {
             self.window.request_redraw();
             self.damage_tracker.frame().mark_fully_damaged();
         }

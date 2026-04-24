@@ -65,7 +65,6 @@ pub struct WindowConfig {
 
     /// Window level.
     pub level: WindowLevel,
-    pub fps: u32,
 }
 
 impl Default for WindowConfig {
@@ -86,7 +85,6 @@ impl Default for WindowConfig {
             decorations_theme_variant: Default::default(),
             option_as_alt: Default::default(),
             level: Default::default(),
-            fps: 60,
         }
     }
 }

@@ -315,9 +315,7 @@ impl MyFramebuffer {
             self.update_cursor(dt);
         }
 
-        if !self.config.general.animated
-            && !self.stop_animated
-            && (now - self.last_cursor_change) >= self.config.general.shader_duration
+        if !self.stop_animated && (now - self.last_cursor_change) >= self.config.general.shader_duration
         {
             self.render_x = self.target_x;
             self.render_y = self.target_y;
@@ -349,7 +347,7 @@ impl MyFramebuffer {
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, self.texture_id);
             gl::Uniform1i(self.loc, 0);
-            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+            gl::DrawArrays(gl::TRIANGLES, 0, 3);
         }
     }
 
