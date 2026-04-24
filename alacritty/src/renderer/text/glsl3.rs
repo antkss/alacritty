@@ -29,7 +29,7 @@ const BATCH_MAX: usize = 0x1_0000;
 #[derive(Debug)]
 pub struct Glsl3Renderer {
     program: TextShaderProgram,
-    pub vao: GLuint,
+    vao: GLuint,
     ebo: GLuint,
     vbo_instance: GLuint,
     atlas: Vec<Atlas>,

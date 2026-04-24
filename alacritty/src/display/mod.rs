@@ -62,13 +62,10 @@ pub mod content;
 pub mod cursor;
 pub mod hint;
 pub mod window;
-pub mod scrollbar;
 
 mod bell;
 mod damage;
 mod meter;
-use scrollbar::Scrollbar;
-use crate::config::ui_config::{Scrollbar as ScrollbarConfig, ScrollbarMode};
 
 /// Label for the forward terminal search bar.
 const FORWARD_SEARCH_LABEL: &str = "Search: ";
@@ -401,7 +398,6 @@ pub struct Display {
     glyph_cache: GlyphCache,
     meter: Meter,
     config: UiConfig,
-    pub scrollbar: Scrollbar,
 }
 
 impl Display {
@@ -441,7 +437,7 @@ impl Display {
         let context = gl_context.make_current(&surface)?;
 
         // Create renderer.
-        let mut renderer = Renderer::new(&context, &config, &window.inner_size())?;
+        let mut renderer = Renderer::new(&context, config.debug.renderer, &config, &window.inner_size())?;
 
         // Load font common glyphs to accelerate rendering.
         debug!("Filling glyph cache with common glyphs");
@@ -453,7 +449,7 @@ impl Display {
         let viewport_size = window.inner_size();
 
         // Create new size with at least one column and row.
-        let mut size_info = SizeInfo::new(
+        let size_info = SizeInfo::new(
             viewport_size.width as f32,
             viewport_size.height as f32,
             cell_width,
@@ -469,7 +465,6 @@ impl Display {
 
         // Update OpenGL projection.
         renderer.resize(&size_info);
-        renderer.vframe.start();
 
         // Clear screen.
         let background_color = config.colors.primary.background;
@@ -519,7 +514,6 @@ impl Display {
         if let Err(err) = surface.set_swap_interval(&context, SwapInterval::DontWait) {
             info!("Failed to disable vsync: {err}");
         }
-
         Ok(Self {
             context: ManuallyDrop::new(context),
             visual_bell: VisualBell::from(&config.bell),
@@ -546,7 +540,6 @@ impl Display {
             meter: Default::default(),
             ime: Default::default(),
             config: config.clone(),
-            scrollbar: Scrollbar::from(&config.scrollbar),
         })
     }
 
@@ -599,7 +592,7 @@ impl Display {
         self.context.make_current(&self.surface).expect("failed to reativate context after reset.");
 
         // Recreate renderer.
-        let renderer = Renderer::new(&self.context, &self.config, &self.window.inner_size())
+        let renderer = Renderer::new(&self.context, self.renderer_preference, &self.config, &self.window.inner_size())
             .expect("failed to recreate renderer after reset");
         self.renderer = ManuallyDrop::new(renderer);
 
@@ -706,9 +699,6 @@ impl Display {
             padding.1,
             config.window.dynamic_padding,
         );
-        if config.scrollbar.mode == ScrollbarMode::Always && new_size.columns > 1 {
-            new_size.columns -= 1;
-        }
 
         // Update number of column/lines in the viewport.
         let search_active = search_state.history_index.is_some();
@@ -846,7 +836,6 @@ impl Display {
         // Make sure this window's OpenGL context is active.
         self.make_current();
         self.renderer.vframe.start();
-
         self.renderer.clear(background_color, config.window_opacity());
         let mut lines = RenderLines::new();
 
@@ -972,15 +961,6 @@ impl Display {
                 self.draw_ime_preview(point, fg, bg, &mut rects, config);
             }
         }
-        if config.scrollbar.mode != ScrollbarMode::Never {
-            self.draw_scrollbar(
-                &mut rects,
-                scheduler,
-                display_offset,
-                total_lines,
-                &config.scrollbar,
-            );
-        }
 
         if let Some(message) = message_buffer.message() {
             let search_offset = usize::from(search_state.regex().is_some());
@@ -1080,7 +1060,6 @@ impl Display {
         self.damage_tracker.debug = config.debug.highlight_damage;
         self.visual_bell.update_config(&config.bell);
         self.colors = List::from(&config.colors);
-        self.scrollbar.update_config(&config.scrollbar);
     }
 
     /// Update the mouse/vi mode cursor hint highlighting.
@@ -1153,66 +1132,6 @@ impl Display {
         }
 
         dirty
-    }
-    fn request_scrollbar_redraw(&mut self, scheduler: &mut Scheduler, wait_timeout: Duration) {
-        let window_id = self.window.id();
-        let timer_id = TimerId::new(Topic::ScrollbarRedraw, window_id);
-        let event = Event::new(EventType::Frame, window_id);
-
-        scheduler.unschedule(timer_id);
-        scheduler.schedule(event, wait_timeout, false, timer_id);
-    }
-    fn draw_scrollbar(
-        &mut self,
-        rects: &mut Vec<RenderRect>,
-        scheduler: &mut Scheduler,
-        display_offset: usize,
-        total_lines: usize,
-        config: &ScrollbarConfig,
-    ) {
-        let did_position_change = self.scrollbar.update(display_offset, total_lines);
-        let opacity = match self.scrollbar.intensity(self.size_info) {
-            scrollbar::ScrollbarState::Show { opacity } => opacity,
-            scrollbar::ScrollbarState::WaitForFading { opacity, remaining_duration } => {
-                self.request_scrollbar_redraw(scheduler, remaining_duration);
-                opacity
-            },
-            scrollbar::ScrollbarState::Fading { opacity } => {
-                self.window.request_redraw();
-                opacity
-            },
-            scrollbar::ScrollbarState::Invisible { has_damage } => {
-                if !has_damage {
-                    return;
-                }
-                0.
-            },
-        };
-        let bg_rect = self.scrollbar.bg_rect(self.size_info);
-        let scrollbar_rect = self.scrollbar.rect_from_bg_rect(bg_rect, self.size_info);
-        let y = self.size_info.height - (scrollbar_rect.y + scrollbar_rect.height) as f32;
-        if opacity != 0. {
-            rects.push(RenderRect::new(
-                scrollbar_rect.x as f32,
-                y,
-                scrollbar_rect.width as f32,
-                scrollbar_rect.height as f32,
-                config.color,
-                opacity,
-            ));
-        }
-
-        if did_position_change
-            || (config.mode == ScrollbarMode::Fading && opacity < config.opacity.as_f32())
-        {
-            self.damage_tracker.frame().add_viewport_rect(
-                &self.size_info,
-                scrollbar_rect.x,
-                y as i32,
-                scrollbar_rect.width,
-                scrollbar_rect.height,
-            );
-        }
     }
 
     #[inline(never)]

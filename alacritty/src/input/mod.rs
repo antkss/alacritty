@@ -36,12 +36,13 @@ use alacritty_terminal::vi_mode::ViMotion;
 use alacritty_terminal::vte::ansi::{ClearMode, Handler};
 
 use crate::clipboard::Clipboard;
-use crate::config::ui_config::ScrollbarMode;
 #[cfg(target_os = "macos")]
 use crate::config::window::Decorations;
-use crate::config::{Action, BindingMode, MouseAction, SearchAction, UiConfig, ViAction};
+use crate::config::{
+    Action, BindingMode, MouseAction, MouseEvent, SearchAction, UiConfig, ViAction,
+};
 use crate::display::hint::HintMatch;
-use crate::display::window::Window;
+use crate::display::window::{ImeInhibitor, Window};
 use crate::display::{Display, SizeInfo};
 use crate::event::{
     ClickState, Event, EventType, InlineSearchState, Mouse, TouchPurpose, TouchZoom,
@@ -466,13 +467,6 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
         let x = x.clamp(0, size_info.width() as i32 - 1) as usize;
         let y = y.clamp(0, size_info.height() as i32 - 1) as usize;
-        if self.ctx.config().scrollbar.mode != ScrollbarMode::Never {
-            let mouse_y_delta = y as f32 - self.ctx.mouse().y as f32;
-            if let Some(drag_event) = self.ctx.display().scrollbar.apply_mouse_delta(mouse_y_delta)
-            {
-                self.ctx.scroll(drag_event);
-            }
-        }
         self.ctx.mouse_mut().x = x;
         self.ctx.mouse_mut().y = y;
 
@@ -664,14 +658,6 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
     /// Handle left click selection and vi mode cursor movement.
     fn on_left_click(&mut self, point: Point) {
-        if self.ctx.config().scrollbar.mode != ScrollbarMode::Never {
-            let size_info = self.ctx.size_info();
-            let mouse_x = self.ctx.mouse().x;
-            let mouse_y = self.ctx.mouse().y;
-            if self.ctx.display().scrollbar.try_start_drag(size_info, mouse_x, mouse_y) {
-                return;
-            };
-        }
         let side = self.ctx.mouse().cell_side;
         let control = self.ctx.modifiers().state().control_key();
 
@@ -708,14 +694,6 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
     }
 
     fn on_mouse_release(&mut self, button: MouseButton) {
-        if self.ctx.config().scrollbar.mode != ScrollbarMode::Never
-            && self.ctx.display().scrollbar.is_dragging()
-        {
-            self.ctx.display().scrollbar.stop_dragging();
-            // Mouse icon is different, when not scrolling.
-            let mouse_state = self.cursor_state();
-            self.ctx.window().set_mouse_cursor(mouse_state);
-        }
         if !self.ctx.modifiers().state().shift_key() && self.ctx.mouse_mode() {
             let code = match button {
                 MouseButton::Left => 0,
@@ -788,20 +766,29 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
         let width = f64::from(self.ctx.size_info().cell_width());
         let height = f64::from(self.ctx.size_info().cell_height());
 
-        if self.ctx.mouse_mode() {
-            self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px;
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px;
+        let multiplier = if self.ctx.mouse_mode() { 1. } else { multiplier };
 
-            let code = if new_scroll_y_px > 0. { MOUSE_WHEEL_UP } else { MOUSE_WHEEL_DOWN };
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as i32;
+        self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px * multiplier;
+        self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
 
+        let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as usize;
+        let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as usize;
+
+        let is_scroll_up = new_scroll_y_px > 0.;
+        let event = if is_scroll_up { MouseEvent::WheelUp } else { MouseEvent::WheelDown };
+
+        if lines != 0 && self.process_mouse_bindings(event) {
+            // Repeat for remaining number of lines.
+            for _ in 1..lines {
+                self.process_mouse_bindings(event);
+            }
+        } else if self.ctx.mouse_mode() {
+            let code = if is_scroll_up { MOUSE_WHEEL_UP } else { MOUSE_WHEEL_DOWN };
             for _ in 0..lines {
                 self.mouse_report(code, ElementState::Pressed);
             }
 
             let code = if new_scroll_x_px > 0. { MOUSE_WHEEL_LEFT } else { MOUSE_WHEEL_RIGHT };
-            let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as i32;
-
             for _ in 0..columns {
                 self.mouse_report(code, ElementState::Pressed);
             }
@@ -812,15 +799,9 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
             .contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
             && !self.ctx.modifiers().state().shift_key()
         {
-            self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px * multiplier;
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
-
             // The chars here are the same as for the respective arrow keys.
-            let line_cmd = if new_scroll_y_px > 0. { b'A' } else { b'B' };
+            let line_cmd = if is_scroll_up { b'A' } else { b'B' };
             let column_cmd = if new_scroll_x_px > 0. { b'D' } else { b'C' };
-
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as usize;
-            let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as usize;
 
             let mut content = Vec::with_capacity(3 * (lines + columns));
 
@@ -837,14 +818,9 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
             }
 
             self.ctx.write_to_pty(content);
-        } else {
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
-
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height) as i32;
-
-            if lines != 0 {
-                self.ctx.scroll(Scroll::Delta(lines));
-            }
+        } else if lines != 0 {
+            let lines = if is_scroll_up { lines as i32 } else { -(lines as i32) };
+            self.ctx.scroll(Scroll::Delta(lines));
         }
 
         self.ctx.mouse_mut().accumulated_scroll.x %= width;
@@ -871,6 +847,11 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
     /// Handle beginning of touch input.
     pub fn on_touch_start(&mut self, touch: TouchEvent) {
+        // Inhibit IME on touch while not focused, forcing a touch tap while focused to enable IME.
+        if !self.ctx.terminal().is_focused {
+            self.ctx.window().set_ime_inhibitor(ImeInhibitor::TOUCH, true);
+        }
+
         let touch_purpose = self.ctx.touch_purpose();
         *touch_purpose = match mem::take(touch_purpose) {
             TouchPurpose::None => TouchPurpose::Tap(touch),
@@ -958,8 +939,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 self.mouse_input(ElementState::Pressed, MouseButton::Left);
                 self.mouse_input(ElementState::Released, MouseButton::Left);
 
-                // Set touch focus, enabling IME.
-                self.ctx.window().set_touch_focus(true);
+                self.ctx.window().set_ime_inhibitor(ImeInhibitor::TOUCH, false);
             },
             // Transition zoom to pending state once a finger was released.
             TouchPurpose::Zoom(zoom) => {
@@ -1045,7 +1025,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 ElementState::Pressed => {
                     // Process mouse press before bindings to update the `click_state`.
                     self.on_mouse_press(button);
-                    self.process_mouse_bindings(button);
+                    self.process_mouse_bindings(MouseEvent::Button(button));
                 },
                 ElementState::Released => self.on_mouse_release(button),
             }
@@ -1056,7 +1036,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
     ///
     /// The provided mode, mods, and key must match what is allowed by a binding
     /// for its action to be executed.
-    fn process_mouse_bindings(&mut self, button: MouseButton) {
+    fn process_mouse_bindings(&mut self, event: MouseEvent) -> bool {
         let mode = BindingMode::new(self.ctx.terminal().mode(), self.ctx.search_active());
         let mouse_mode = self.ctx.mouse_mode();
         let mods = self.ctx.modifiers().state();
@@ -1064,24 +1044,27 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
         // If mouse mode is active, also look for bindings without shift.
         let fallback_allowed = mouse_mode && mods.contains(ModifiersState::SHIFT);
-        let mut exact_match_found = false;
+        let mut match_found: bool = false;
 
         for binding in &mouse_bindings {
             // Don't trigger normal bindings in mouse mode unless Shift is pressed.
-            if binding.is_triggered_by(mode, mods, &button) && (fallback_allowed || !mouse_mode) {
+            if binding.is_triggered_by(mode, mods, &event) && (fallback_allowed || !mouse_mode) {
                 binding.action.execute(&mut self.ctx);
-                exact_match_found = true;
+                match_found = true;
             }
         }
 
-        if fallback_allowed && !exact_match_found {
+        if fallback_allowed && !match_found {
             let fallback_mods = mods & !ModifiersState::SHIFT;
             for binding in &mouse_bindings {
-                if binding.is_triggered_by(mode, fallback_mods, &button) {
+                if binding.is_triggered_by(mode, fallback_mods, &event) {
                     binding.action.execute(&mut self.ctx);
+                    match_found = true;
                 }
             }
         }
+
+        match_found
     }
 
     /// Check mouse icon state in relation to the message bar.
@@ -1111,17 +1094,6 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
     /// Icon state of the cursor.
     fn cursor_state(&mut self) -> CursorIcon {
-        if self.ctx.config().scrollbar.mode != ScrollbarMode::Never {
-            if self.ctx.display().scrollbar.is_dragging() {
-                return CursorIcon::RowResize;
-            }
-            let display_size = self.ctx.size_info();
-            let mouse_x = self.ctx.mouse().x;
-            let mouse_y = self.ctx.mouse().y;
-            if self.ctx.display().scrollbar.contains_mouse_pos(display_size, mouse_x, mouse_y) {
-                return CursorIcon::Default;
-            }
-        }
         let display_offset = self.ctx.terminal().grid().display_offset();
         let point = self.ctx.mouse().point(&self.ctx.size_info(), display_offset);
         let hyperlink = self.ctx.terminal().grid()[point].hyperlink();

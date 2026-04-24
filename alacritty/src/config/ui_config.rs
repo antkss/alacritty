@@ -34,7 +34,6 @@ use crate::config::scrolling::Scrolling;
 use crate::config::selection::Selection;
 use crate::config::terminal::Terminal;
 use crate::config::window::WindowConfig;
-use crate::display::color::Rgb;
 
 /// Regex used for the default URL hint.
 #[rustfmt::skip]
@@ -89,7 +88,6 @@ pub struct UiConfig {
 
     /// Keyboard configuration.
     keyboard: Keyboard,
-    pub scrollbar: Scrollbar,
 
     /// Path to a shell program to run on startup.
     #[config(deprecated = "use terminal.shell instead")]
@@ -115,34 +113,7 @@ pub struct UiConfig {
     #[config(deprecated = "use general.ipc_socket instead")]
     pub ipc_socket: Option<bool>,
 }
-#[derive(ConfigDeserialize, Serialize, Clone, Debug, PartialEq)]
-pub struct Scrollbar {
-    pub mode: ScrollbarMode,
-    pub color: Rgb,
-    /// Scrollbar opacity from 0.0 (invisible) to 1.0 (opaque).
-    pub opacity: Percentage,
-    /// Time (in miliseconds) the scrollbar fading takes.
-    pub duration: u32,
-}
 
-impl Default for Scrollbar {
-    fn default() -> Self {
-        Scrollbar {
-            mode: Default::default(),
-            color: Rgb::new(0x7f, 0x7f, 0x7f),
-            opacity: Percentage::new(0.5),
-            duration: 2000,
-        }
-    }
-}
-
-#[derive(ConfigDeserialize, Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ScrollbarMode {
-    #[default]
-    Never,
-    Fading,
-    Always,
-}
 impl UiConfig {
     /// Derive [`TermConfig`] from the config.
     pub fn term_options(&self) -> TermConfig {

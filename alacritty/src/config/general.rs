@@ -41,7 +41,7 @@ impl Default for General {
             import: Default::default(),
             shader: "".to_string(),
             animated: false,
-            shader_duration: 0.08,
+            shader_duration: 1.0,
         }
     }
 }

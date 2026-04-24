@@ -123,6 +123,7 @@ impl Renderer {
     /// supported OpenGL version.
     pub fn new(
         context: &PossiblyCurrentContext,
+        renderer_preference: Option<RendererPreference>,
         config: &UiConfig,
         innersize: &PhysicalSize<u32>,
     ) -> Result<Self, Error> {
@@ -149,7 +150,7 @@ impl Renderer {
         let is_gles_context = matches!(context.context_api(), ContextApi::Gles(_));
 
         // Use the config option to enforce a particular renderer configuration.
-        let (use_glsl3, allow_dsb) = match config.debug.renderer {
+        let (use_glsl3, allow_dsb) = match renderer_preference {
             Some(RendererPreference::Glsl3) => (true, true),
             Some(RendererPreference::Gles2) => (false, true),
             Some(RendererPreference::Gles2Pure) => (false, false),
@@ -183,10 +184,10 @@ impl Renderer {
     pub fn update_render(&mut self, size_info: &SizeInfo, cursor_pos_x: f32, cursor_pos_y: f32) {
         match &mut self.text_renderer {
             TextRendererProvider::Glsl3(glsl_render) => {
-                self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y, glsl_render.vao);
+                self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y);
             }
             TextRendererProvider::Gles2(gles_render) => {
-                self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y, gles_render.vao);
+                self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y);
             }
         }
     }
@@ -338,7 +339,7 @@ impl Renderer {
 
     pub fn finish(&self) {
         // unsafe {
-            // gl::Finish();
+        //     gl::Finish();
         // }
     }
 

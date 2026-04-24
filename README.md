@@ -5,7 +5,7 @@
 <h1 align="center">Alacritty - A fast, cross-platform, OpenGL terminal emulator</h1>
 
 <p align="center">
-  <img alt="Alacritty (Custom shaders fork ) - A fast, cross-platform, OpenGL terminal emulator"
+  <img alt="Alacritty - A fast, cross-platform, OpenGL terminal emulator"
        src="https://raw.githubusercontent.com/alacritty/alacritty/master/extra/promo/alacritty-readme.png">
 </p>
 
@@ -26,16 +26,7 @@ Precompiled binaries are available from the [GitHub releases page](https://githu
 Join [`#alacritty`] on libera.chat if you have questions or looking for a quick help.
 
 [`#alacritty`]: https://web.libera.chat/gamja/?channels=#alacritty
-Note: this is not the official repo, this just a fork
-config:
-```
-[general]
-live_config_reload =false
-import = ["~/.config/alacritty/color.toml"]
-shaders = "/home/as/cursorf.glsl"
-[window]
-fps = 30
-```
+
 ## Features
 
 You can find an overview over the features available in Alacritty [here](./docs/features.md).

@@ -26,7 +26,7 @@ const TEXT_SHADER_V: &str = include_str!("../../../res/gles2/text.v.glsl");
 #[derive(Debug)]
 pub struct Gles2Renderer {
     program: TextShaderProgram,
-    pub vao: GLuint,
+    vao: GLuint,
     vbo: GLuint,
     ebo: GLuint,
     atlas: Vec<Atlas>,
@@ -181,7 +181,9 @@ impl<'a> TextRenderer<'a> for Gles2Renderer {
     where
         F: FnOnce(Self::RenderApi) -> T,
     {
+        self.active_tex = 0;
         unsafe {
+            gl::Enable(gl::BLEND);
             gl::UseProgram(self.program.id());
             gl::BindVertexArray(self.vao);
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.ebo);

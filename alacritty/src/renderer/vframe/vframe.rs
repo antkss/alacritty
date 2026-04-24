@@ -11,6 +11,7 @@ pub struct MyFramebuffer {
     pub fbo_id: gl::types::GLuint,     // The FBO itself
     pub texture_id: gl::types::GLuint, // The texture we draw *into*
     pub rbo_id: gl::types::GLuint,     // The depth/stencil buffer
+    pub fullscreen_vao: GLuint,
     pub width: i32,
     pub height: i32,
     program: GLuint,
@@ -48,6 +49,7 @@ impl Drop for MyFramebuffer {
             gl::DeleteFramebuffers(1, &self.fbo_id);
             gl::DeleteTextures(1, &self.texture_id);
             gl::DeleteRenderbuffers(1, &self.rbo_id);
+            gl::DeleteVertexArrays(1, &self.fullscreen_vao);
         }
     }
 }
@@ -148,7 +150,7 @@ impl MyFramebuffer {
         let time_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTime\0".as_ptr() as *const i8) };
         let change_loc = unsafe { gl::GetUniformLocation(program_use_id, "iTimeCursorChange\0".as_ptr() as *const i8) };
         let duration_loc = unsafe { gl::GetUniformLocation(program_use_id, b"iDuration\0".as_ptr() as *const i8) };
-        let (fbo_id, texture_id, rbo_id) = Self::setup_vframe(width, height);
+        let (fbo_id, texture_id, rbo_id, fullscreen_vao) = Self::setup_vframe(width, height);
         Ok(MyFramebuffer {
             fbo_id: fbo_id,
             texture_id: texture_id,
@@ -180,10 +182,16 @@ impl MyFramebuffer {
             vel_y: 0.0,
             config: config,
             stop_animated: true,
+            fullscreen_vao: fullscreen_vao,
         })
     }
 
-    pub fn setup_vframe(width: i32, height: i32) -> (GLuint, GLuint, GLuint) {
+    pub fn setup_vframe(width: i32, height: i32) -> (GLuint, GLuint, GLuint, GLuint) {
+        let mut fullscreen_vao: GLuint = 0;
+
+        unsafe {
+          gl::GenVertexArrays(1, &mut fullscreen_vao);
+        }
         let (mut fbo_id, mut texture_id, mut rbo_id) = (0, 0, 0);
 
 
@@ -239,7 +247,7 @@ impl MyFramebuffer {
 
             // 4. --- CHECK IF IT'S COMPLETE ---
             if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
-                return (0, 0, 0);
+                return (0, 0, 0, 0);
             }
 
             // 5. --- UNBIND ---
@@ -248,7 +256,7 @@ impl MyFramebuffer {
 
 
         }
-        (fbo_id, texture_id, rbo_id)
+        (fbo_id, texture_id, rbo_id, fullscreen_vao)
     }
     fn update_cursor(&mut self, dt: f32) {
         let stiffness = 420.0;
@@ -279,7 +287,6 @@ impl MyFramebuffer {
         size_info: &SizeInfo,
         cursor_pos_x: f32,
         cursor_pos_y: f32,
-        vao: GLuint,
     ) {
         let now = self.start_time.elapsed().as_secs_f32();
         let cellw = size_info.cell_width();
@@ -331,7 +338,7 @@ impl MyFramebuffer {
             gl::Viewport(0, 0, size_info.width() as i32, size_info.height() as i32);
             gl::ClearColor(0.0, 0.0, 0.0, 0.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-            gl::BindVertexArray(vao);
+            gl::BindVertexArray(self.fullscreen_vao);
             gl::UseProgram(self.program);
 
             gl::Uniform2f(self.resolution_loc, size_info.width() as f32, size_info.height() as f32);
@@ -384,7 +391,7 @@ impl MyFramebuffer {
             new_width,
             new_height,
         );
-        gl::BindRenderbuffer(gl::FRAMEBUFFER, 0); // Unbind
+        gl::BindRenderbuffer(gl::RENDERBUFFER, 0); // Unbind
         self.width = new_width;
         self.height = new_height;
     }
