@@ -30,6 +30,7 @@ pub struct General {
     pub shader: String,
     pub animated: bool,
     pub shader_duration: f32,
+    pub vframe_fps: u64,
 }
 
 impl Default for General {
@@ -42,6 +43,7 @@ impl Default for General {
             shader: "".to_string(),
             animated: false,
             shader_duration: 1.0,
+            vframe_fps: 60,
         }
     }
 }

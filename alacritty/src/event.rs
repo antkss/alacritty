@@ -443,7 +443,7 @@ impl ApplicationHandler<Event> for Processor {
             (EventType::Frame, Some(window_id)) => {
                 if let Some(window_context) = self.windows.get_mut(window_id) {
                     window_context.display.window.has_frame = true;
-                    if window_context.dirty {
+                    if window_context.dirty || window_context.display.needs_vframe_redraw() {
                         window_context.display.window.request_redraw();
                     }
                 }

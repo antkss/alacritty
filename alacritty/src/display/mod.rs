@@ -397,7 +397,6 @@ pub struct Display {
 
     glyph_cache: GlyphCache,
     meter: Meter,
-    config: UiConfig,
 }
 
 impl Display {
@@ -437,7 +436,7 @@ impl Display {
         let context = gl_context.make_current(&surface)?;
 
         // Create renderer.
-        let mut renderer = Renderer::new(&context, config.debug.renderer, &config, &window.inner_size())?;
+        let mut renderer = Renderer::new(&context, config.debug.renderer, &window.inner_size())?;
 
         // Load font common glyphs to accelerate rendering.
         debug!("Filling glyph cache with common glyphs");
@@ -539,7 +538,6 @@ impl Display {
             cursor_hidden: Default::default(),
             meter: Default::default(),
             ime: Default::default(),
-            config: config.clone(),
         })
     }
 
@@ -592,7 +590,7 @@ impl Display {
         self.context.make_current(&self.surface).expect("failed to reativate context after reset.");
 
         // Recreate renderer.
-        let renderer = Renderer::new(&self.context, self.renderer_preference, &self.config, &self.window.inner_size())
+        let renderer = Renderer::new(&self.context, self.renderer_preference, &self.window.inner_size())
             .expect("failed to recreate renderer after reset");
         self.renderer = ManuallyDrop::new(renderer);
 
@@ -836,6 +834,7 @@ impl Display {
         // Make sure this window's OpenGL context is active.
         self.make_current();
         self.renderer.vframe.start();
+
         self.renderer.clear(background_color, config.window_opacity());
         let mut lines = RenderLines::new();
 
@@ -1027,6 +1026,7 @@ impl Display {
             self.highlight_damage(&mut rects);
             self.renderer.draw_rects(&self.size_info, &metrics, rects);
         }
+
         self.renderer.vframe.stop();
         let point = cursor.point();
         let cursor_pos_x = point.column.0 as f32 * size_info.cell_width() + size_info.padding_x();
@@ -1044,13 +1044,15 @@ impl Display {
 
         // XXX: Request the new frame after swapping buffers, so the
         // time to finish OpenGL operations is accounted for in the timeout.
-        if !matches!(self.raw_window_handle, RawWindowHandle::Wayland(_)) {
+        let needs_vframe_redraw = self.renderer.vframe.needs_redraw();
+        if needs_vframe_redraw {
+            self.request_vframe_frame(scheduler);
+        } else if !matches!(self.raw_window_handle, RawWindowHandle::Wayland(_)) {
             self.request_frame(scheduler);
         }
 
         self.damage_tracker.swap_damage();
-        if !self.renderer.vframe.stop_animated || self.config.general.animated {
-            self.window.request_redraw();
+        if needs_vframe_redraw {
             self.damage_tracker.frame().mark_fully_damaged();
         }
     }
@@ -1442,9 +1444,6 @@ impl Display {
 
     /// Request a new frame for a window on Wayland.
     fn request_frame(&mut self, scheduler: &mut Scheduler) {
-        // Mark that we've used a frame.
-        self.window.has_frame = false;
-
         // Get the display vblank interval.
         let monitor_vblank_interval = 1_000_000.
             / self
@@ -1458,13 +1457,31 @@ impl Display {
             Duration::from_micros((1000. * monitor_vblank_interval) as u64);
 
         let swap_timeout = self.frame_timer.compute_timeout(monitor_vblank_interval);
+        self.schedule_frame(scheduler, swap_timeout);
+    }
+
+    #[inline]
+    pub fn needs_vframe_redraw(&self) -> bool {
+        self.renderer.vframe.needs_redraw()
+    }
+
+    #[inline]
+    fn request_vframe_frame(&mut self, scheduler: &mut Scheduler) {
+        self.schedule_frame(scheduler, self.renderer.vframe.redraw_interval());
+    }
+
+    fn schedule_frame(&mut self, scheduler: &mut Scheduler, timeout: Duration) {
+        // Mark that we've used a frame.
+        self.window.has_frame = false;
 
         let window_id = self.window.id();
         let timer_id = TimerId::new(Topic::Frame, window_id);
         let event = Event::new(EventType::Frame, window_id);
 
-        scheduler.schedule(event, swap_timeout, false, timer_id);
+        scheduler.unschedule(timer_id);
+        scheduler.schedule(event, timeout, false, timer_id);
     }
+
 }
 
 impl Drop for Display {

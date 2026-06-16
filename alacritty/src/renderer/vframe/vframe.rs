@@ -6,6 +6,9 @@ use crate::gl::types::GLint;
 use crate::config::UiConfig;
 use crate::renderer::vframe::ShaderRawPro;
 use crate::{display::SizeInfo, gl::{self, types::{ GLuint }}};
+use crate::config;
+use std::time::Duration;
+use crate::cli::Options;
 #[derive(Debug, Clone)]
 pub struct MyFramebuffer {
     pub fbo_id: gl::types::GLuint,     // The FBO itself
@@ -37,7 +40,7 @@ pub struct MyFramebuffer {
     render_y: f32,
     vel_x: f32,
     vel_y: f32,
-    config: UiConfig,
+    pub config: UiConfig,
 
 }
 
@@ -97,12 +100,15 @@ impl MyFramebuffer {
     pub fn create_framebuffer(
         width: i32,
         height: i32,
-        config: UiConfig
         // vao: GLuint,
         // vbo: GLuint,
     ) -> Result<Self, String> {
         let mut program_use_id: GLuint = 0;
         let mut is_cprogram_loaded: bool = false;
+        let mut options = Options::new();
+        let config = config::load(&mut options);
+
+        println!("shader: {}", config.general.shader.clone());
         let program_default = ShaderRawPro::new(DEFAULT_VERTEX.to_string(), DEFAULT_FRAGMENT.to_string());
         let mut fragment_path: PathBuf = PathBuf::from(config.general.shader.clone());
         if fragment_path.is_relative() {
@@ -406,7 +412,13 @@ impl MyFramebuffer {
 
         }
     }
-
+    pub fn needs_redraw(&self) -> bool {
+        !self.stop_animated || self.config.general.animated
+    }
+    pub fn redraw_interval(&self) -> Duration {
+        let fps = self.config.general.vframe_fps.max(1);
+        Duration::from_secs_f64(1.0 / fps as f64)
+    }
     pub fn stop(&self) {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, 0) };
     }

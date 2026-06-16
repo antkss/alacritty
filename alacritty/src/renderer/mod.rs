@@ -16,7 +16,6 @@ use alacritty_terminal::index::Point;
 use alacritty_terminal::term::cell::Flags;
 use winit::dpi::PhysicalSize;
 
-use crate::config::UiConfig;
 use crate::config::debug::RendererPreference;
 use crate::display::SizeInfo;
 use crate::display::color::Rgb;
@@ -124,7 +123,6 @@ impl Renderer {
     pub fn new(
         context: &PossiblyCurrentContext,
         renderer_preference: Option<RendererPreference>,
-        config: &UiConfig,
         innersize: &PhysicalSize<u32>,
     ) -> Result<Self, Error> {
         // We need to load OpenGL functions once per instance, but only after we make our context
@@ -177,16 +175,16 @@ impl Renderer {
                 gl::DebugMessageCallback(Some(gl_debug_log), ptr::null_mut());
             }
         }
-        let vframe = MyFramebuffer::create_framebuffer(innersize.width as  i32, innersize.height as i32, config.clone()).expect("Failed to create frame buffer !");
+        let vframe = MyFramebuffer::create_framebuffer(innersize.width as  i32, innersize.height as i32).expect("Failed to create frame buffer !");
 
         Ok(Self { text_renderer, rect_renderer, robustness, vframe: vframe })
     }
     pub fn update_render(&mut self, size_info: &SizeInfo, cursor_pos_x: f32, cursor_pos_y: f32) {
         match &mut self.text_renderer {
-            TextRendererProvider::Glsl3(glsl_render) => {
+            TextRendererProvider::Glsl3(_) => {
                 self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y);
             }
-            TextRendererProvider::Gles2(gles_render) => {
+            TextRendererProvider::Gles2(_) => {
                 self.vframe.update_render_data(size_info, cursor_pos_x, cursor_pos_y);
             }
         }
@@ -338,9 +336,9 @@ impl Renderer {
     }
 
     pub fn finish(&self) {
-        // unsafe {
-        //     gl::Finish();
-        // }
+        unsafe {
+            gl::Finish();
+        }
     }
 
     /// Set the viewport for cell rendering.
